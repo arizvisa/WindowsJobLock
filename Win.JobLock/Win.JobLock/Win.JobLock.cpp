@@ -23,6 +23,10 @@ TCHAR *strName = NULL;
 DWORD dwProcessLimit = 0;
 DWORD dwJobMemory = 0;
 DWORD dwProcessMemory = 0;
+LARGE_INTEGER dwProcessTicksLimit = { 0 };
+LARGE_INTEGER dwJobTicksLimit = { 0 };
+SIZE_T dwMinimumWorkingSetSize = -1;
+SIZE_T dwMaximumWorkingSetSize = -1;
 BOOL  bKillProcOnJobClose = FALSE;
 BOOL  bBreakAwayOK = FALSE;
 BOOL  bSilentBreakAwayOK = FALSE;
@@ -111,7 +115,7 @@ BOOL BuildAndDeploy()
 		} else if (GetLastError() ==ERROR_ALREADY_EXISTS){ 
 			_ftprintf(stdout,L"[!] Couldn't create job %s due to a job already existing with that name\n",strFinalName);
 		} else {
-			_ftprintf(stdout,L"[!] Couldn't create job %s due to an unknown error %d\n",GetLastError());
+			_ftprintf(stdout,L"[!] Couldn't create job %s due to an unknown error %d\n",strFinalName, GetLastError());
 		}
 		return FALSE;
 	}
@@ -126,10 +130,29 @@ BOOL BuildAndDeploy()
 		jelInfo.JobMemoryLimit = dwJobMemory;
 	}
 		
-
 	if(dwProcessMemory){
 		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
 		jelInfo.ProcessMemoryLimit = dwProcessMemory;
+	}
+
+	if (dwJobTicksLimit.QuadPart) {
+		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+		jelInfo.BasicLimitInformation.PerJobUserTimeLimit = dwProcessTicksLimit;
+	}
+
+	if (dwProcessTicksLimit.QuadPart) {
+		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+		jelInfo.BasicLimitInformation.PerProcessUserTimeLimit = dwProcessTicksLimit;
+	}
+
+	if (dwMinimumWorkingSetSize) {
+		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
+		jelInfo.BasicLimitInformation.MinimumWorkingSetSize = dwMinimumWorkingSetSize;
+	}
+
+	if (dwMaximumWorkingSetSize) {
+		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
+		jelInfo.BasicLimitInformation.MinimumWorkingSetSize = dwMinimumWorkingSetSize;
 	}
 
 	if(bKillProcOnJobClose) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
@@ -194,6 +217,10 @@ void PrintSettings()
 	fprintf(stdout,"[i] Process Limit                 - %s - %d\n", dwProcessLimit > 0 ? "True " : "False", dwProcessLimit);
 	fprintf(stdout,"[i] Job Memory Limit              - %s - %d\n", dwJobMemory > 0 ? "True " : "False", dwJobMemory);
 	fprintf(stdout,"[i] Process Memory Limit          - %s - %d\n", dwProcessMemory > 0 ? "True " : "False", dwProcessMemory);
+	fprintf(stdout,"[i] Job Execution Time Limit      - %s - %lld\n", dwJobTicksLimit.QuadPart > 0 ? "True " : "False", dwJobTicksLimit.QuadPart);
+	fprintf(stdout,"[i] Process Execution Time Limit  - %s - %lld\n", dwProcessTicksLimit.QuadPart > 0 ? "True " : "False", dwProcessTicksLimit.QuadPart);
+	fprintf(stdout,"[i] Minimum Working Set Limit     - %s - %d\n", dwMinimumWorkingSetSize > -1 ? "True " : "False", dwMinimumWorkingSetSize);
+	fprintf(stdout,"[i] Maximum Working Set Limti     - %s - %d\n", dwMaximumWorkingSetSize > -1 ? "True " : "False", dwMaximumWorkingSetSize);
 	fprintf(stdout,"[i] Kill Process on Job Close     - %s\n", bKillProcOnJobClose == TRUE ? "True ": "False");
 	fprintf(stdout,"[i] Break Away from Job OK        - %s\n", bBreakAwayOK == TRUE ? "True ": "False");
 	fprintf(stdout,"[i] Silent Break Away from Job OK - %s\n", bSilentBreakAwayOK == TRUE ? "True ": "False");
@@ -228,6 +255,13 @@ void PrintHelp(TCHAR *strExe){
         fprintf (stdout,"    -m <bytes>  - Limit the total memory in bytes for the entire job\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_MEMORY
 		fprintf (stdout,"    -M <bytes>  - Limit the total memory in bytes for each process in the job\n");
+		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_JOB_TIME
+		fprintf(stdout, "    -t <ticks>   - Limit the execution time for the entire job by 100ns ticks\n");
+		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_TIME
+		fprintf(stdout, "    -T <ticks>   - Limit the execution time for each process in the job by 100ns ticks\n");
+		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_WORKINGSET
+		fprintf(stdout, "    -w <min-bytes> - Limit the minimum working set size\n");
+		fprintf(stdout, "    -W <max-bytes> - Limit the maximum working set size\n");
 		fprintf (stdout," [.Process Control.]\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         fprintf (stdout,"    -k          - Kill all process when the job handle dies\n");
@@ -252,6 +286,11 @@ void PrintHelp(TCHAR *strExe){
 		fprintf (stdout,"    -s          - Prevent processes within job from changing system parameters\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_WRITECLIPBOARD
 		fprintf (stdout,"    -C          - Prevent processes within job from writing the clipboard\n");
+		// JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
+		// JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
+		// JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+		// JOBOBJECT_NOTIFICATION_LIMIT_INFORMATION
+
 
 		fprintf (stdout,"\n");
         ExitProcess(1);
@@ -273,7 +312,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	printf("[*] -h for help \n");
 
 	// Extract all the options
-	while ((chOpt = getopt(argc, argv, _T("P:p:l:m:M:n:gkBbdDxaucsCh"))) != EOF) 
+	while ((chOpt = getopt(argc, argv, _T("P:p:l:m:M:n:t:T:w:W:gkBbdDxaucsCh"))) != EOF) 
 		switch(chOpt)
 		{
 			case _T('g'):
@@ -293,6 +332,18 @@ int _tmain(int argc, _TCHAR* argv[])
 				break;
 			case _T('M'):
 				dwProcessMemory = _tstoi(optarg);
+				break;
+			case _T('t'):
+				dwJobTicksLimit.QuadPart = _tstoi64(optarg);
+				break;
+			case _T('T'):
+				dwProcessTicksLimit.QuadPart = _tstoi64(optarg);
+				break;
+			case _T('w'):
+				dwMinimumWorkingSetSize = _tstoi(optarg);
+				break;
+			case _T('W'):
+				dwMaximumWorkingSetSize = _tstoi(optarg);
 				break;
 			case _T('n'):
 				strName = optarg;
