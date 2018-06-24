@@ -244,15 +244,15 @@ void PrintHelp(TCHAR *strExe){
 
         _ftprintf(stdout,L"    i.e. %s [-h] \n",strExe);
 		fprintf (stdout,"\n");
-		fprintf (stdout," [.General Settings / Options.]\n");
+		fprintf (stdout," General Settings / Options:\n");
 		fprintf (stdout,"    -g          - Get process list\n");
 		fprintf (stdout,"    -P <name>   - Process name to apply the job to\n");
 		fprintf (stdout,"    -p <PID>    - PID to apply the job to\n");
         fprintf (stdout,"    -n <name>   - What the job will be called (optional)\n");
-		fprintf (stdout," [.Process Limits.]\n");
+		fprintf (stdout," Process Limits:\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_ACTIVE_PROCESS
         fprintf (stdout,"    -l <number> - Limit the number of process to this many\n");
-		fprintf (stdout," [.Memory.]\n");
+		fprintf (stdout," Memory:\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_JOB_MEMORY
         fprintf (stdout,"    -m <bytes>  - Limit the total memory in bytes for the entire job\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_MEMORY
@@ -264,30 +264,30 @@ void PrintHelp(TCHAR *strExe){
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_WORKINGSET
 		fprintf(stdout, "    -w <min-bytes> - Limit the minimum working set size\n");
 		fprintf(stdout, "    -W <max-bytes> - Limit the maximum working set size\n");
-		fprintf (stdout," [.Process Control.]\n");
+		fprintf (stdout," Process Control:\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
         fprintf (stdout,"    -k          - Kill all process when the job handle dies\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_BREAKAWAY_OK
 		fprintf (stdout,"    -B          - Allow child process to be created with CREATE_BREAKAWAY_FROM_JOB (weak security)\n");
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
 		fprintf (stdout,"    -b          - Allow child process which aren't part of the job (weak security)\n");
-		fprintf (stdout," [.UI Security Controls.]\n");
+		fprintf (stdout," UI Security Controls (should be combined as a single parameter to -u):\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DESKTOP
-        fprintf (stdout,"    -d          - Prevent processes within the job from switching or creating desktops\n");
+        fprintf (stdout,"    -u d        - Prevent processes within the job from switching or creating desktops\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
-        fprintf (stdout,"    -D          - Prevent processes within the job from calling the change display setting function\n");
+        fprintf (stdout,"    -u D        - Prevent processes within the job from calling the change display setting function\n");
         // JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_EXITWINDOWS
-		fprintf (stdout,"    -x          - Prevent processes within job from calling the exit Windows function\n");
+		fprintf (stdout,"    -u x        - Prevent processes within job from calling the exit Windows function\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_GLOBALATOMS
-		fprintf (stdout,"    -a          - Prevent processes within job from accessing global atoms\n");
+		fprintf (stdout,"    -u a        - Prevent processes within job from accessing global atoms\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_HANDLES
-		fprintf (stdout,"    -u          - Prevent processes within job from using user handles\n");
+		fprintf (stdout,"    -u u        - Prevent processes within job from using user handles\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_READCLIPBOARD
-		fprintf (stdout,"    -c          - Prevent processes within job from reading the clipboard\n");
+		fprintf (stdout,"    -u c        - Prevent processes within job from reading the clipboard\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
-		fprintf (stdout,"    -s          - Prevent processes within job from changing system parameters\n");
+		fprintf (stdout,"    -u s        - Prevent processes within job from changing system parameters\n");
 		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_WRITECLIPBOARD
-		fprintf (stdout,"    -C          - Prevent processes within job from writing the clipboard\n");
+		fprintf (stdout,"    -u C        - Prevent processes within job from writing the clipboard\n");
 		// JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
 		// JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
 		// JOBOBJECT_EXTENDED_LIMIT_INFORMATION
