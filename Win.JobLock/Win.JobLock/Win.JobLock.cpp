@@ -27,17 +27,19 @@ LARGE_INTEGER dwProcessTicksLimit = { 0 };
 LARGE_INTEGER dwJobTicksLimit = { 0 };
 SIZE_T dwMinimumWorkingSetSize = -1;
 SIZE_T dwMaximumWorkingSetSize = -1;
-BOOL  bKillProcOnJobClose = FALSE;
-BOOL  bBreakAwayOK = FALSE;
-BOOL  bSilentBreakAwayOK = FALSE;
-BOOL  bUILimitDesktop = FALSE;
-BOOL  bUILimitDispSettings = FALSE;
-BOOL  bUILimitExitWindows = FALSE;
-BOOL  bUILimitUserHandles = FALSE;
-BOOL  bUILimitGlobalAtoms = FALSE;
-BOOL  bUILimitReadClip = FALSE;
-BOOL  bUILimitSystemParams = FALSE;
-BOOL  bUILimitWriteClip = FALSE;
+struct {
+	BOOL  bKillProcOnJobClose;
+	BOOL  bBreakAwayOK;
+	BOOL  bSilentBreakAwayOK;
+	BOOL  bUILimitDesktop;
+	BOOL  bUILimitDispSettings;
+	BOOL  bUILimitExitWindows;
+	BOOL  bUILimitUserHandles;
+	BOOL  bUILimitGlobalAtoms;
+	BOOL  bUILimitReadClip;
+	BOOL  bUILimitSystemParams;
+	BOOL  bUILimitWriteClip;
+} UI = { FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE };
 HANDLE hJob = NULL;
 
 
@@ -155,17 +157,17 @@ BOOL BuildAndDeploy()
 		jelInfo.BasicLimitInformation.MinimumWorkingSetSize = dwMinimumWorkingSetSize;
 	}
 
-	if(bKillProcOnJobClose) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-	if(bBreakAwayOK) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-	if(bSilentBreakAwayOK) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
-	if(bUILimitDesktop)  jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DESKTOP;
-	if(bUILimitDispSettings) jbuiRestrictions.UIRestrictionsClass|= JOB_OBJECT_UILIMIT_DISPLAYSETTINGS;
-	if(bUILimitExitWindows) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_EXITWINDOWS;
-	if(bUILimitGlobalAtoms) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_GLOBALATOMS;
-	if(bUILimitUserHandles) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_HANDLES;
-	if(bUILimitReadClip) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_READCLIPBOARD;
-	if(bUILimitSystemParams) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS;
-	if(bUILimitWriteClip) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
+	if(UI.bKillProcOnJobClose) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+	if(UI.bBreakAwayOK) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+	if(UI.bSilentBreakAwayOK) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+	if(UI.bUILimitDesktop)  jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DESKTOP;
+	if(UI.bUILimitDispSettings) jbuiRestrictions.UIRestrictionsClass|= JOB_OBJECT_UILIMIT_DISPLAYSETTINGS;
+	if(UI.bUILimitExitWindows) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_EXITWINDOWS;
+	if(UI.bUILimitGlobalAtoms) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_GLOBALATOMS;
+	if(UI.bUILimitUserHandles) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_HANDLES;
+	if(UI.bUILimitReadClip) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_READCLIPBOARD;
+	if(UI.bUILimitSystemParams) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS;
+	if(UI.bUILimitWriteClip) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
 
 	
 	if(!SetInformationJobObject(hJob,JobObjectExtendedLimitInformation,&jelInfo,sizeof(jelInfo))){
@@ -221,17 +223,17 @@ void PrintSettings()
 	fprintf(stdout,"[i] Process Execution Time Limit  - %s - %lld\n", dwProcessTicksLimit.QuadPart > 0 ? "True " : "False", dwProcessTicksLimit.QuadPart);
 	fprintf(stdout,"[i] Minimum Working Set Limit     - %s - %d\n", dwMinimumWorkingSetSize > -1 ? "True " : "False", dwMinimumWorkingSetSize);
 	fprintf(stdout,"[i] Maximum Working Set Limti     - %s - %d\n", dwMaximumWorkingSetSize > -1 ? "True " : "False", dwMaximumWorkingSetSize);
-	fprintf(stdout,"[i] Kill Process on Job Close     - %s\n", bKillProcOnJobClose == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Break Away from Job OK        - %s\n", bBreakAwayOK == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Silent Break Away from Job OK - %s\n", bSilentBreakAwayOK == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit Desktop Operations      - %s\n", bUILimitDesktop == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit Display Changes         - %s\n", bUILimitDispSettings == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit Exit Windows            - %s\n", bUILimitExitWindows == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit Global Atoms            - %s\n", bUILimitGlobalAtoms == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit User Handles            - %s\n", bUILimitUserHandles == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit Reading of Clipboard    - %s\n", bUILimitReadClip == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit System Parameter Change - %s\n", bUILimitSystemParams == TRUE ? "True ": "False");
-	fprintf(stdout,"[i] Limit Writing to Clipboard    - %s\n", bUILimitWriteClip == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Kill Process on Job Close     - %s\n", UI.bKillProcOnJobClose == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Break Away from Job OK        - %s\n", UI.bBreakAwayOK == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Silent Break Away from Job OK - %s\n", UI.bSilentBreakAwayOK == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit Desktop Operations      - %s\n", UI.bUILimitDesktop == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit Display Changes         - %s\n", UI.bUILimitDispSettings == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit Exit Windows            - %s\n", UI.bUILimitExitWindows == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit Global Atoms            - %s\n", UI.bUILimitGlobalAtoms == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit User Handles            - %s\n", UI.bUILimitUserHandles == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit Reading of Clipboard    - %s\n", UI.bUILimitReadClip == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit System Parameter Change - %s\n", UI.bUILimitSystemParams == TRUE ? "True ": "False");
+	fprintf(stdout,"[i] Limit Writing to Clipboard    - %s\n", UI.bUILimitWriteClip == TRUE ? "True ": "False");
 }
 
 //
@@ -312,7 +314,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	printf("[*] -h for help \n");
 
 	// Extract all the options
-	while ((chOpt = getopt(argc, argv, _T("P:p:l:m:M:n:t:T:w:W:gkBbdDxaucsCh"))) != EOF) 
+	while ((chOpt = getopt(argc, argv, _T("hP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) 
 		switch(chOpt)
 		{
 			case _T('g'):
@@ -348,38 +350,29 @@ int _tmain(int argc, _TCHAR* argv[])
 			case _T('n'):
 				strName = optarg;
 				break;
-			case _T('k'):
-				bKillProcOnJobClose = TRUE;
-				break;
-			case _T('B'):
-				bBreakAwayOK = TRUE;
-				break;
-			case _T('b'):
-				bSilentBreakAwayOK= TRUE;
-				break;
-			case _T('d'):
-				bUILimitDesktop = TRUE;
-				break;
-			case _T('D'):
-				bUILimitDispSettings = TRUE;
-				break;
-			case _T('x'):
-				bUILimitExitWindows = TRUE;
-				break;
-			case _T('a'):
-				bUILimitGlobalAtoms = TRUE;
-				break;
 			case _T('u'):
-				bUILimitUserHandles = TRUE;
-				break;
-			case _T('c'):
-				bUILimitReadClip = TRUE;
-				break;
-			case _T('s'):
-				bUILimitSystemParams = TRUE;
-				break;
-			case _T('C'):
-				bUILimitWriteClip = TRUE;
+				if (_tcsstr(optarg, _T("k")))
+					UI.bKillProcOnJobClose = TRUE;
+				if (_tcsstr(optarg, _T("B")))
+					UI.bBreakAwayOK = TRUE;
+				if (_tcsstr(optarg, _T("b")))
+					UI.bSilentBreakAwayOK = TRUE;
+				if (_tcsstr(optarg, _T("d")))
+					UI.bUILimitDesktop = TRUE;
+				if (_tcsstr(optarg, _T("D")))
+					UI.bUILimitDispSettings = TRUE;
+				if (_tcsstr(optarg, _T("x")))
+					UI.bUILimitExitWindows = TRUE;
+				if (_tcsstr(optarg, _T("a")))
+					UI.bUILimitGlobalAtoms = TRUE;
+				if (_tcsstr(optarg, _T("u")))
+					UI.bUILimitUserHandles = TRUE;
+				if (_tcsstr(optarg, _T("c")))
+					UI.bUILimitReadClip = TRUE;
+				if (_tcsstr(optarg, _T("s")))
+					UI.bUILimitSystemParams = TRUE;
+				if (_tcsstr(optarg, _T("C")))
+					UI.bUILimitWriteClip = TRUE;
 				break;
 			case _T('h'):
 				PrintHelp(argv[0]);
