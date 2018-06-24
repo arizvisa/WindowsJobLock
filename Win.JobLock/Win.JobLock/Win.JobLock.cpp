@@ -1,5 +1,5 @@
 /*
-A Microsoft Windows Process Lockdown Tool using Job Objects 
+A Microsoft Windows Process Lockdown Tool using Job Objects
 
 Released as open source by NCC Group Plc - http://www.nccgroup.com/
 
@@ -40,8 +40,6 @@ struct {
 	BOOL  bUILimitSystemParams;
 	BOOL  bUILimitWriteClip;
 } UI = { FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE };
-HANDLE hJob = NULL;
-
 
 //
 // Function	: FindProcess
@@ -90,38 +88,28 @@ BOOL FindProcessName(DWORD dwPID, TCHAR *strName)
 	return FALSE;
 }
 
-BOOL BuildAndDeploy()
+HANDLE
+InitializeJobObject(TCHAR* jobName)
 {
+	HANDLE hJob = NULL;
 	TCHAR strFinalName[MAX_PATH] = { 0 };
+
 	JOBOBJECT_EXTENDED_LIMIT_INFORMATION jelInfo = { 0 };
 	JOBOBJECT_BASIC_UI_RESTRICTIONS jbuiRestrictions = { 0 };
 
 	jelInfo.BasicLimitInformation.LimitFlags = 0;
 	jbuiRestrictions.UIRestrictionsClass = 0;
 
-	// Risk of truncation in theory
-	if(strName != NULL){
-		_tcscpy_s(strFinalName,MAX_PATH,L"Local\\");
-		_tcscat_s(strFinalName,MAX_PATH,strName);
-		hJob = CreateJobObject(NULL,strFinalName);
-	} else {
-		hJob = CreateJobObject(NULL,NULL);
-	}
-	
+	// construct a job object using the name if specified
+	hJob = CreateJobObject(NULL, jobName);
 
-	_ftprintf(stdout,L"[i] Final job name                - %s\n",strName == NULL ? L"NONAME" : strFinalName);
+	_ftprintf(stdout, L"[i] Final job name                - %s\n", (jobName == NULL)? L"NONAME" : jobName);
 
-	if(hJob == NULL){
-		if(GetLastError() ==  ERROR_INVALID_HANDLE){
-			_ftprintf(stdout,L"[!] Couldn't create job %s due to a object name conflict\n",strFinalName);
-		} else if (GetLastError() ==ERROR_ALREADY_EXISTS){ 
-			_ftprintf(stdout,L"[!] Couldn't create job %s due to a job already existing with that name\n",strFinalName);
-		} else {
-			_ftprintf(stdout,L"[!] Couldn't create job %s due to an unknown error %d\n",strFinalName, GetLastError());
-		}
-		return FALSE;
-	}
+	// shit, we failed...
+	if (hJob == NULL)
+		goto fail;
 
+	// populate the job-specific structures using globals initialized by getopt
 	if(dwProcessLimit){
 		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
 		jelInfo.BasicLimitInformation.ActiveProcessLimit = dwProcessLimit;
@@ -169,21 +157,51 @@ BOOL BuildAndDeploy()
 	if(UI.bUILimitSystemParams) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS;
 	if(UI.bUILimitWriteClip) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
 
-	
-	if(!SetInformationJobObject(hJob,JobObjectExtendedLimitInformation,&jelInfo,sizeof(jelInfo))){
-		_ftprintf(stdout,L"[!] Couldn't set job extended limits to job object %s due to an error %d\n",(_tcslen(strFinalName) ==0 ) ? L"Unknown" : strFinalName, GetLastError());
-		return FALSE;
-	} else {
-		_ftprintf(stdout,L"[*] Applied job exended limits to job object\n");
+	// Now we can set these structures to the job object
+	if (!SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jelInfo, sizeof(jelInfo))) {
+		_ftprintf(stdout,L"[!] Couldn't set job extended limits to job object %s due to an error %d\n",(jobName == NULL)? L"Unknown" : jobName, GetLastError());
+		goto fail;
+	}
+	_ftprintf(stdout,L"[*] Applied job exended limits to job object\n");
+
+	if (!SetInformationJobObject(hJob, JobObjectBasicUIRestrictions, &jbuiRestrictions, sizeof(jbuiRestrictions))) {
+		_ftprintf(stdout,L"[!] Couldn't set UI limits to job object %s due to an error %d\n",(jobName == NULL)? L"Unknown" : jobName, GetLastError());
+		goto fail;
+	}
+	_ftprintf(stdout,L"[*] Applied UI limits to job object\n");
+
+	return hJob;
+
+fail:
+	if (hJob)
+		CloseHandle(hJob);
+	return NULL;
+}
+
+BOOL BuildAndDeploy()
+{
+	HANDLE hJob;
+
+	TCHAR strFinalName[MAX_PATH] = { 0 };
+
+	// Risk of truncation in theory
+	if(strName != NULL){
+		_tcscpy_s(strFinalName,MAX_PATH,L"Local\\");
+		_tcscat_s(strFinalName,MAX_PATH,strName);
 	}
 
-	if(!SetInformationJobObject(hJob,JobObjectBasicUIRestrictions,&jbuiRestrictions,sizeof(jbuiRestrictions))){
-		_ftprintf(stdout,L"[!] Couldn't set UI limits to job object %s due to an error %d\n",(_tcslen(strFinalName) ==0 ) ? L"Unknown" : strFinalName, GetLastError());
+	// Initialize a Job object using the arguments the user specified
+	hJob = InitializeJobObject((strName == NULL)? NULL : strFinalName);
+	if(hJob == NULL){
+		if(GetLastError() ==  ERROR_INVALID_HANDLE){
+			_ftprintf(stdout,L"[!] Couldn't create job %s due to a object name conflict\n",strFinalName);
+		} else if (GetLastError() ==ERROR_ALREADY_EXISTS){
+			_ftprintf(stdout,L"[!] Couldn't create job %s due to a job already existing with that name\n",strFinalName);
+		} else {
+			_ftprintf(stdout,L"[!] Couldn't create job %s due to an unknown error %d\n",strFinalName, GetLastError());
+		}
 		return FALSE;
-	} else {
-		_ftprintf(stdout,L"[*] Applied UI limits to job object\n");
 	}
-
 
 	// Duplicate the handle into the target process
 	if(!DuplicateHandle(GetCurrentProcess(),hJob,hProcess,NULL,JOB_OBJECT_QUERY,TRUE,NULL)){
@@ -200,7 +218,7 @@ BOOL BuildAndDeploy()
 			_ftprintf(stdout,L"[!] Couldn't apply job object to %s Looks like a job object has already been applied\n", strProcess);
 			return FALSE;
 		} else {
-			_ftprintf(stdout,L"[!] Couldn't apply job object to %s due to an error %d - %d\n", strProcess, GetLastError(),sizeof(jbuiRestrictions));
+			_ftprintf(stdout,L"[!] Couldn't apply job object to %s due to an error %d\n", strProcess, GetLastError());
 		}
 	} else {
 		_ftprintf(stdout,L"[*] Applied job object to process!\n");
@@ -314,7 +332,7 @@ int _tmain(int argc, _TCHAR* argv[])
 	printf("[*] -h for help \n");
 
 	// Extract all the options
-	while ((chOpt = getopt(argc, argv, _T("hP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) 
+	while ((chOpt = getopt(argc, argv, _T("hP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF)
 		switch(chOpt)
 		{
 			case _T('g'):
