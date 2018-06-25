@@ -15,11 +15,7 @@ Released under AGPL see LICENSE for more information
 #include "Wtsapi32.h"
 
 // Global
-BOOL bListProcesses=FALSE;
-HANDLE hProcess = NULL;
-TCHAR *strProcess = NULL;
-DWORD dwPID = 0;
-TCHAR *strName = NULL;
+BOOL bListProcesses = FALSE;
 DWORD dwProcessLimit = 0;
 DWORD dwJobMemory = 0;
 DWORD dwProcessMemory = 0;
@@ -47,7 +43,7 @@ struct {
 //
 DWORD FindProcess(TCHAR *strName)
 {
-	DWORD dwPIDArray[2048], dwCount = 0, dwRet;
+	DWORD dwCount = 0, dwRet;
 	PWTS_PROCESS_INFO ppProcessInfo;
 
 	if (!WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE, 0, 1, &ppProcessInfo, &dwRet))
@@ -83,7 +79,7 @@ ListProcesses()
 //
 BOOL FindProcessName(DWORD dwPID, TCHAR *strName)
 {
-	DWORD dwPIDArray[2048], dwCount = 0, dwRet;
+	DWORD dwCount, dwRet;
 	PWTS_PROCESS_INFO ppProcessInfo;
 
 	if (!WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE, 0, 1, &ppProcessInfo, &dwRet))
@@ -188,20 +184,20 @@ fail:
 	return NULL;
 }
 
-BOOL BuildAndDeploy()
+BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 {
 	HANDLE hJob;
 
 	TCHAR strFinalName[MAX_PATH] = { 0 };
 
 	// Risk of truncation in theory
-	if(strName != NULL){
+	if(jobName != NULL){
 		_tcscpy_s(strFinalName,MAX_PATH,L"Local\\");
-		_tcscat_s(strFinalName,MAX_PATH,strName);
+		_tcscat_s(strFinalName,MAX_PATH,jobName);
 	}
 
 	// Initialize a Job object using the arguments the user specified
-	hJob = InitializeJobObject((strName == NULL)? NULL : strFinalName);
+	hJob = InitializeJobObject((jobName == NULL)? NULL : strFinalName);
 	if(hJob == NULL){
 		if(GetLastError() ==  ERROR_INVALID_HANDLE){
 			_ftprintf(stdout,L"[!] Couldn't create job %s due to a object name conflict\n",strFinalName);
@@ -262,6 +258,34 @@ void PrintSettings()
 	fprintf(stdout,"[i] Limit Reading of Clipboard    - %s\n", UI.bUILimitReadClip == TRUE ? "True ": "False");
 	fprintf(stdout,"[i] Limit System Parameter Change - %s\n", UI.bUILimitSystemParams == TRUE ? "True ": "False");
 	fprintf(stdout,"[i] Limit Writing to Clipboard    - %s\n", UI.bUILimitWriteClip == TRUE ? "True ": "False");
+}
+
+BOOL
+AttachJobToPid(DWORD pid, TCHAR* jobName)
+{
+	HANDLE hProcess = NULL;
+	TCHAR strProcName[MAX_PATH];
+
+	if (!FindProcessName(pid, strProcName)) {
+		_ftprintf(stderr, L"[!] Could not find the name of the process for PID %d!\n", pid);
+		return FALSE;
+	}
+
+	hProcess = OpenProcess(PROCESS_SET_QUOTA|PROCESS_TERMINATE|PROCESS_DUP_HANDLE, false, pid);
+	if(hProcess == NULL || hProcess == INVALID_HANDLE_VALUE){
+		_ftprintf(stderr, L"[!] Could not open process %s (PID %d) - %d\n", strProcName, pid, GetLastError());
+		return FALSE;
+	}
+	_ftprintf(stdout,L"[*] Opened process %s\n",strProcName);
+
+	PrintSettings();
+
+	if (!BuildAndDeploy(jobName, strProcName, hProcess)) {
+		_ftprintf(stderr, L"[!] Failed to build and deploy job object to %s..\n", strProcName);
+	}
+
+	_ftprintf(stdout,L"[*] Successfully built and deployed job object to %s!\n",strProcName);
+	return TRUE;
 }
 
 //
@@ -335,7 +359,8 @@ int _tmain(int argc, _TCHAR* argv[])
 {
 	DWORD dwPID = 0;
 	char  chOpt;
-	TCHAR strProcName[MAX_PATH];
+	TCHAR *strProcess = NULL;
+	TCHAR *strName = NULL;
 
 	// variables pertaining to command to execute
 	int argpos; _TCHAR** cmdv;
@@ -424,50 +449,23 @@ int _tmain(int argc, _TCHAR* argv[])
 	if (argpos < argc)
 		cmdv = &argv[argpos + 1];
 
-	// continue doing what Ollie Whitehouse was doing...
-	if(bListProcesses) {
+	// List processe if requested by user
+	if (bListProcesses) {
 		ListProcesses();
 		return 0;
 	}
 	
-	if(strProcess!=NULL){
+	// If the name was specified, then look for its pid.
+	if (strProcess)
 		dwPID = FindProcess(strProcess);
-	}
 
-	if(dwPID == 0){
-		if(strProcess != NULL) {
-			_ftprintf(stderr,L"[!] Could not find the process %s\n",strProcess);
-		} else {
-			// XXX: Case to handle when a method doesn't exist
-			_ftprintf(stderr,L"[!] You need to specify a PID or valid process name (use -g to list processes)\n");
-		}
-		return -1;
-	}
+	if (dwPID)
+		return AttachJobToPid(dwPID, strName)? 0 : -1;
 
-	if(!FindProcessName(dwPID,strProcName)){
-		_ftprintf(stderr,L"[!] Could not find the name of the process for PID %d!\n",dwPID);
-		return -1;
-	} else {
-		// this is so I can be lazy later
-		strProcess = strProcName;
-	}
-
-	hProcess = OpenProcess(PROCESS_SET_QUOTA|PROCESS_TERMINATE|PROCESS_DUP_HANDLE,false,dwPID);
-	if(hProcess == NULL || hProcess == INVALID_HANDLE_VALUE){
-		_ftprintf(stderr,L"[!] Could not open process %s (PID %d) - %d\n",strProcName,dwPID,GetLastError());
-		return -1;
-	} else {
-		_ftprintf(stdout,L"[*] Opened process %s\n",strProcName);
-	}
-
-	PrintSettings();
-	if(!BuildAndDeploy()){
-		_ftprintf(stderr,L"[!] Failed to build and deploy job object to %s..\n",strProcName);
-		return -1;
-	} else {
-		_ftprintf(stdout,L"[*] Successfully built and deployed job object to %s!\n",strProcName);
-	}
-
-	return 0;
+	if (strProcess)
+		_ftprintf(stderr,L"[!] Could not find the process %s\n",strProcess);
+	else
+		// XXX: Case to handle when a method doesn't exist
+		_ftprintf(stderr,L"[!] You need to specify a PID or valid process name (use -g to list processes)\n");
+	return -1;
 }
-
