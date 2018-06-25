@@ -327,79 +327,94 @@ int _tmain(int argc, _TCHAR* argv[])
 	char  chOpt;
 	TCHAR strProcName[MAX_PATH];
 
+	// variables pertaining to command to execute
+	int argpos; _TCHAR** cmdv;
+
 	printf("[*] A Microsoft Windows Process Lockdown Tool using Job Objects - https://github.com/nccgroup/WindowsJobLock\n");
 	printf("[*] NCC Group Plc - http://www.nccgroup.com/ \n");
 	printf("[*] -h for help \n");
 
 	// Extract all the options
-	while ((chOpt = getopt(argc, argv, _T("hP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF)
-		switch(chOpt)
-		{
-			case _T('g'):
-				bListProcesses = TRUE;
-				break;
-			case _T('P'):
-				strProcess = optarg;
-				break;
-			case _T('p'):
-				dwPID = _tstoi(optarg);
-				break;
-			case _T('l'):
-				dwProcessLimit = _tstoi(optarg);
-				break;
-			case _T('m'):
-				dwJobMemory = _tstoi(optarg);
-				break;
-			case _T('M'):
-				dwProcessMemory = _tstoi(optarg);
-				break;
-			case _T('t'):
-				dwJobTicksLimit.QuadPart = _tstoi64(optarg);
-				break;
-			case _T('T'):
-				dwProcessTicksLimit.QuadPart = _tstoi64(optarg);
-				break;
-			case _T('w'):
-				dwMinimumWorkingSetSize = _tstoi(optarg);
-				break;
-			case _T('W'):
-				dwMaximumWorkingSetSize = _tstoi(optarg);
-				break;
-			case _T('n'):
-				strName = optarg;
-				break;
-			case _T('u'):
-				if (_tcsstr(optarg, _T("k")))
-					UI.bKillProcOnJobClose = TRUE;
-				if (_tcsstr(optarg, _T("B")))
-					UI.bBreakAwayOK = TRUE;
-				if (_tcsstr(optarg, _T("b")))
-					UI.bSilentBreakAwayOK = TRUE;
-				if (_tcsstr(optarg, _T("d")))
-					UI.bUILimitDesktop = TRUE;
-				if (_tcsstr(optarg, _T("D")))
-					UI.bUILimitDispSettings = TRUE;
-				if (_tcsstr(optarg, _T("x")))
-					UI.bUILimitExitWindows = TRUE;
-				if (_tcsstr(optarg, _T("a")))
-					UI.bUILimitGlobalAtoms = TRUE;
-				if (_tcsstr(optarg, _T("u")))
-					UI.bUILimitUserHandles = TRUE;
-				if (_tcsstr(optarg, _T("c")))
-					UI.bUILimitReadClip = TRUE;
-				if (_tcsstr(optarg, _T("s")))
-					UI.bUILimitSystemParams = TRUE;
-				if (_tcsstr(optarg, _T("C")))
-					UI.bUILimitWriteClip = TRUE;
-				break;
-			case _T('h'):
-				PrintHelp(argv[0]);
-				return 0;
-			default:
-				fwprintf(stderr,L"[!] No handler - %c\n", chOpt);
-				break;
-        }
+	argpos = 0;
+	while ((chOpt = getopt(argc, argv, _T("hP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) {
+		switch (chOpt) {
+		case _T('g'):
+			bListProcesses = TRUE;
+			break;
+		case _T('P'):
+			strProcess = optarg;
+			break;
+		case _T('p'):
+			dwPID = _tstoi(optarg);
+			break;
+		case _T('l'):
+			dwProcessLimit = _tstoi(optarg);
+			break;
+		case _T('m'):
+			dwJobMemory = _tstoi(optarg);
+			break;
+		case _T('M'):
+			dwProcessMemory = _tstoi(optarg);
+			break;
+		case _T('t'):
+			dwJobTicksLimit.QuadPart = _tstoi64(optarg);
+			break;
+		case _T('T'):
+			dwProcessTicksLimit.QuadPart = _tstoi64(optarg);
+			break;
+		case _T('w'):
+			dwMinimumWorkingSetSize = _tstoi(optarg);
+			break;
+		case _T('W'):
+			dwMaximumWorkingSetSize = _tstoi(optarg);
+			break;
+		case _T('n'):
+			strName = optarg;
+			break;
+		case _T('u'):
+			if (_tcsstr(optarg, _T("k")))
+				UI.bKillProcOnJobClose = TRUE;
+			if (_tcsstr(optarg, _T("B")))
+				UI.bBreakAwayOK = TRUE;
+			if (_tcsstr(optarg, _T("b")))
+				UI.bSilentBreakAwayOK = TRUE;
+			if (_tcsstr(optarg, _T("d")))
+				UI.bUILimitDesktop = TRUE;
+			if (_tcsstr(optarg, _T("D")))
+				UI.bUILimitDispSettings = TRUE;
+			if (_tcsstr(optarg, _T("x")))
+				UI.bUILimitExitWindows = TRUE;
+			if (_tcsstr(optarg, _T("a")))
+				UI.bUILimitGlobalAtoms = TRUE;
+			if (_tcsstr(optarg, _T("u")))
+				UI.bUILimitUserHandles = TRUE;
+			if (_tcsstr(optarg, _T("c")))
+				UI.bUILimitReadClip = TRUE;
+			if (_tcsstr(optarg, _T("s")))
+				UI.bUILimitSystemParams = TRUE;
+			if (_tcsstr(optarg, _T("C")))
+				UI.bUILimitWriteClip = TRUE;
+			break;
+		case _T('h'):
+			PrintHelp(argv[0]);
+			return 0;
+		default:
+			fwprintf(stderr, L"[!] No handler - %c\n", chOpt);
+			break;
+		}
+		argpos++;
+	}
+	cmdv = &argv[argpos];
 
+	// cmdv should be pointing to "--", but if it's not then seek to it.
+	while (argpos < argc && _tcscmp(argv[argpos], _T("--")) != 0)
+		argpos++;
+
+	// if a "--" was found, then point cmdv at the arg following it
+	if (argpos < argc)
+		cmdv = &argv[argpos + 1];
+
+	// continue doing what Ollie Whitehouse was doing...
 	if(bListProcesses) {
 		FindProcess(NULL);
 		return 0;
