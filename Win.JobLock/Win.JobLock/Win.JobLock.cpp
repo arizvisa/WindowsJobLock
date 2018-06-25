@@ -47,23 +47,34 @@ struct {
 //
 DWORD FindProcess(TCHAR *strName)
 {
-	 DWORD dwPIDArray[2048], dwCount = 0, dwRet;
-	 PWTS_PROCESS_INFO ppProcessInfo;
+	DWORD dwPIDArray[2048], dwCount = 0, dwRet;
+	PWTS_PROCESS_INFO ppProcessInfo;
 
-     if(WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE,0,1,&ppProcessInfo,&dwRet)){
-		for(dwCount=0;dwCount<dwRet;dwCount++){
-
-			if(strName == NULL){
-				_ftprintf(stdout,L"[i] %s (%d) in session %d\n",ppProcessInfo[dwCount].pProcessName,ppProcessInfo[dwCount].ProcessId,ppProcessInfo[dwCount].SessionId);
-			} else {
-				if(lstrcmp(ppProcessInfo[dwCount].pProcessName,strName) == 0 ){
-					return ppProcessInfo[dwCount].ProcessId;
-				}
-			}
+	if (!WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE, 0, 1, &ppProcessInfo, &dwRet))
+		return 0;
+	
+	for (dwCount = 0; dwCount < dwRet; dwCount++) {
+		if (lstrcmp(ppProcessInfo[dwCount].pProcessName, strName) == 0) {
+			 return ppProcessInfo[dwCount].ProcessId;
 		}
-	 }
+	}
 
-	return FALSE;
+	return 0;
+}
+
+void
+ListProcesses()
+{
+	DWORD dwCount, dwRet;
+	PWTS_PROCESS_INFO ppProcessInfo;
+
+	if (!WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE, 0, 1, &ppProcessInfo, &dwRet))
+		return;
+
+	for(dwCount=0; dwCount<dwRet; dwCount++)
+		_ftprintf(stdout, L"[i] %s (%d) in session %d\n", ppProcessInfo[dwCount].pProcessName, ppProcessInfo[dwCount].ProcessId, ppProcessInfo[dwCount].SessionId);
+
+	return;
 }
 
 //
@@ -72,19 +83,18 @@ DWORD FindProcess(TCHAR *strName)
 //
 BOOL FindProcessName(DWORD dwPID, TCHAR *strName)
 {
-	 DWORD dwPIDArray[2048], dwCount = 0, dwRet;
-	 PWTS_PROCESS_INFO ppProcessInfo;
+	DWORD dwPIDArray[2048], dwCount = 0, dwRet;
+	PWTS_PROCESS_INFO ppProcessInfo;
 
-     if(WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE,0,1,&ppProcessInfo,&dwRet)){
-		for(dwCount=0;dwCount<dwRet;dwCount++){
+	if (!WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE, 0, 1, &ppProcessInfo, &dwRet))
+		return FALSE;
 
-			if(ppProcessInfo[dwCount].ProcessId== dwPID ){
-				_tcscpy_s(strName,MAX_PATH,ppProcessInfo[dwCount].pProcessName);
-				return TRUE;
-			}
+	for (dwCount = 0; dwCount < dwRet; dwCount++) {
+		if(ppProcessInfo[dwCount].ProcessId== dwPID ){
+			_tcscpy_s(strName, MAX_PATH, ppProcessInfo[dwCount].pProcessName);
+			return TRUE;
 		}
-	 }
-
+	}
 	return FALSE;
 }
 
@@ -416,7 +426,7 @@ int _tmain(int argc, _TCHAR* argv[])
 
 	// continue doing what Ollie Whitehouse was doing...
 	if(bListProcesses) {
-		FindProcess(NULL);
+		ListProcesses();
 		return 0;
 	}
 	
@@ -428,6 +438,7 @@ int _tmain(int argc, _TCHAR* argv[])
 		if(strProcess != NULL) {
 			_ftprintf(stderr,L"[!] Could not find the process %s\n",strProcess);
 		} else {
+			// XXX: Case to handle when a method doesn't exist
 			_ftprintf(stderr,L"[!] You need to specify a PID or valid process name (use -g to list processes)\n");
 		}
 		return -1;
