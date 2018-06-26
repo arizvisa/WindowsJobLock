@@ -15,12 +15,13 @@ Released under AGPL see LICENSE for more information
 #include "Wtsapi32.h"
 
 // Pre-processor macros
-#define JOBNAME(name) (name? name : _T("None"))
+#define JOBNAME(name) (name? name : _T("unnamed"))
 #define TF(expr) ((expr)? _T("True") : _T("False"))
 
 // Global
 BOOL bListProcesses = FALSE;
-BOOL bInheritConsole = FALSE;
+BOOL bCreateConsole = FALSE;
+BOOL bIgnoreJobFailures = FALSE;
 DWORD dwProcessLimit = 0;
 DWORD dwJobMemory = 0;
 DWORD dwProcessMemory = 0;
@@ -105,9 +106,15 @@ InitializeJobObject(TCHAR* jobName)
 	HANDLE hJob = NULL;
 	TCHAR strFinalName[MAX_PATH] = { 0 };
 
+	struct jobLimits { BOOL basic : 1, extended : 1, ui : 1; };
+	struct jobLimits jobRequired = { 0 };
+	struct jobLimits jobSuccess = { TRUE, TRUE, TRUE };
+
+	JOBOBJECT_BASIC_LIMIT_INFORMATION jblInfo = { 0 };
 	JOBOBJECT_EXTENDED_LIMIT_INFORMATION jelInfo = { 0 };
 	JOBOBJECT_BASIC_UI_RESTRICTIONS jbuiRestrictions = { 0 };
 
+	jblInfo.LimitFlags = 0;
 	jelInfo.BasicLimitInformation.LimitFlags = 0;
 	jbuiRestrictions.UIRestrictionsClass = 0;
 
@@ -121,66 +128,135 @@ InitializeJobObject(TCHAR* jobName)
 		goto fail;
 
 	// populate the job-specific structures using globals initialized by getopt
-	if(dwProcessLimit){
-		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
-		jelInfo.BasicLimitInformation.ActiveProcessLimit = dwProcessLimit;
+	if (dwProcessLimit) {
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+		jblInfo.ActiveProcessLimit = dwProcessLimit;
 	}
 
-	if(dwJobMemory){
+	if (dwJobMemory) {
+		jobRequired.extended = TRUE;
 		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
 		jelInfo.JobMemoryLimit = dwJobMemory;
 	}
-		
-	if(dwProcessMemory){
+
+	if (dwProcessMemory) {
+		jobRequired.extended = TRUE;
 		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
 		jelInfo.ProcessMemoryLimit = dwProcessMemory;
 	}
 
 	if (dwJobTicksLimit.QuadPart) {
-		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
-		jelInfo.BasicLimitInformation.PerJobUserTimeLimit = dwProcessTicksLimit;
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+		jblInfo.PerJobUserTimeLimit = dwProcessTicksLimit;
 	}
 
 	if (dwProcessTicksLimit.QuadPart) {
-		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
-		jelInfo.BasicLimitInformation.PerProcessUserTimeLimit = dwProcessTicksLimit;
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+		jblInfo.PerProcessUserTimeLimit = dwProcessTicksLimit;
 	}
 
 	if (dwMinimumWorkingSetSize != -1) {
-		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
-		jelInfo.BasicLimitInformation.MinimumWorkingSetSize = dwMinimumWorkingSetSize;
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
+		jblInfo.MinimumWorkingSetSize = dwMinimumWorkingSetSize;
+		if (dwMaximumWorkingSetSize == -1)
+			jblInfo.MaximumWorkingSetSize = MAXSIZE_T;
 	}
 
 	if (dwMaximumWorkingSetSize != -1) {
-		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
-		jelInfo.BasicLimitInformation.MinimumWorkingSetSize = dwMinimumWorkingSetSize;
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
+		if (dwMinimumWorkingSetSize == -1)
+			jblInfo.MinimumWorkingSetSize = 1;
+		jblInfo.MaximumWorkingSetSize = dwMaximumWorkingSetSize;
 	}
 
-	if(UI.bKillProcOnJobClose) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-	if(UI.bBreakAwayOK) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-	if(UI.bSilentBreakAwayOK) jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
-	if(UI.bUILimitDesktop)  jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DESKTOP;
-	if(UI.bUILimitDispSettings) jbuiRestrictions.UIRestrictionsClass|= JOB_OBJECT_UILIMIT_DISPLAYSETTINGS;
-	if(UI.bUILimitExitWindows) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_EXITWINDOWS;
-	if(UI.bUILimitGlobalAtoms) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_GLOBALATOMS;
-	if(UI.bUILimitUserHandles) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_HANDLES;
-	if(UI.bUILimitReadClip) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_READCLIPBOARD;
-	if(UI.bUILimitSystemParams) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS;
-	if(UI.bUILimitWriteClip) jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
+	if (UI.bKillProcOnJobClose) {
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+	}
+	if (UI.bBreakAwayOK) {
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+	}
+	if (UI.bSilentBreakAwayOK) {
+		jobRequired.basic = TRUE;
+		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+	}
+
+	if (UI.bUILimitDesktop) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DESKTOP;
+	}
+	if (UI.bUILimitDispSettings) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DISPLAYSETTINGS;
+	}
+	if (UI.bUILimitExitWindows) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_EXITWINDOWS;
+	}
+	if (UI.bUILimitGlobalAtoms) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_GLOBALATOMS;
+	}
+	if (UI.bUILimitUserHandles) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_HANDLES;
+	}
+	if (UI.bUILimitReadClip) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_READCLIPBOARD;
+	}
+	if (UI.bUILimitSystemParams) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS;
+	}
+	if (UI.bUILimitWriteClip) {
+		jobRequired.ui = TRUE;
+		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
+	}
 
 	// Now we can set these structures to the job object
-	if (!SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jelInfo, sizeof(jelInfo))) {
-		_ftprintf(stdout, _T("[!] Couldn't set job extended limits to job object %s due to an error %d\n"), JOBNAME(jobName), GetLastError());
-		goto fail;
+	if (!SetInformationJobObject(hJob, JobObjectBasicLimitInformation, &jblInfo, sizeof(jblInfo))) {
+		_ftprintf(stdout, _T("[!] Couldn't set job basic limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
+		jobSuccess.basic = FALSE;
 	}
-	_ftprintf(stdout, _T("[*] Applied job exended limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
+	else
+		_ftprintf(stdout, _T("[*] Applied job basic limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
+
+	if (!SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jelInfo, sizeof(jelInfo))) {
+		_ftprintf(stdout, _T("[!] Couldn't set job extended limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
+		jobSuccess.extended = FALSE;
+	}
+	else
+		_ftprintf(stdout, _T("[*] Applied job extended limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
 
 	if (!SetInformationJobObject(hJob, JobObjectBasicUIRestrictions, &jbuiRestrictions, sizeof(jbuiRestrictions))) {
-		_ftprintf(stdout, _T("[!] Couldn't set UI limits to job object %s due to an error %d\n"), JOBNAME(jobName), GetLastError());
+		_ftprintf(stdout, _T("[!] Couldn't set job UI limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
+		jobSuccess.ui = FALSE;
+	}
+	else
+		_ftprintf(stdout, _T("[*] Applied job UI limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
+
+	// Check if everything failed, and fail if so.
+	if (!bIgnoreJobFailures && (!jobSuccess.basic && jobRequired.basic)) {
+		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)\n"), _T("basic"), JOBNAME(jobName), GetLastError());
 		goto fail;
 	}
-	_ftprintf(stdout, _T("[*] Applied UI limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
+	if (!bIgnoreJobFailures && (!jobSuccess.extended && jobRequired.extended)) {
+		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)\n"), _T("extended"), JOBNAME(jobName), GetLastError());
+		goto fail;
+	}
+	if (!bIgnoreJobFailures && (!jobSuccess.ui && jobRequired.ui)) {
+		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)\n"), _T("ui"), JOBNAME(jobName), GetLastError());
+		goto fail;
+	}
 
+	// Okay. We should be good to go.
 	return hJob;
 
 fail:
@@ -211,14 +287,14 @@ BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 		} else if (err == ERROR_ALREADY_EXISTS) {
 			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a job already existing with that name\n"), JOBNAME(jobName));
 		} else {
-			_ftprintf(stdout, _T("[!] Couldn't create job %s due to an unknown error %d\n"), JOBNAME(jobName), err);
+			_ftprintf(stdout, _T("[!] Couldn't create job %s: error %d\n"), JOBNAME(jobName), err);
 		}
 		return FALSE;
 	}
 
 	// Duplicate the handle into the target process
 	if(!DuplicateHandle(GetCurrentProcess(),hJob,hProcess,NULL,JOB_OBJECT_QUERY,TRUE,NULL)){
-		_ftprintf(stdout, _T("[!] Couldn't duplicate job handle into target process due to an error %d\n"), GetLastError());
+		_ftprintf(stdout, _T("[!] Couldn't duplicate job handle into target process: error %d\n"), GetLastError());
 		return FALSE;
 	} else {
 		_ftprintf(stdout, _T("[*] Duplicated handle of job (with restricted access) into target process!\n"));
@@ -231,7 +307,7 @@ BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 			_ftprintf(stdout, _T("[!] Couldn't apply job object to %s Looks like a job object has already been applied\n"), strProcess);
 			return FALSE;
 		} else
-			_ftprintf(stdout, _T("[!] Couldn't apply job object to %s due to an error %d\n"), strProcess, err);
+			_ftprintf(stdout, _T("[!] Couldn't apply job object to %s: error %d\n"), strProcess, err);
 	} else
 		_ftprintf(stdout, _T("[*] Applied job object to process!\n"));
 
@@ -362,7 +438,7 @@ StartProcess(TCHAR* appname, TCHAR* cmdline)
 
 	// FIXME: use STARTUPINFOEX to inherit just the job handle instead of inheriting all handles
 
-	if (!CreateProcess(appname, cmdline, NULL, NULL, TRUE, (bInheritConsole? CREATE_NEW_PROCESS_GROUP : CREATE_NEW_CONSOLE), NULL, NULL, (LPSTARTUPINFOW)&si, &pi))
+	if (!CreateProcess(appname, cmdline, NULL, NULL, TRUE, (bCreateConsole? CREATE_NEW_CONSOLE : CREATE_NEW_PROCESS_GROUP), NULL, NULL, (LPSTARTUPINFOW)&si, &pi))
 		return NULL;
 
 	CloseHandle(pi.hThread);
@@ -398,13 +474,13 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 		} else if (err == ERROR_ALREADY_EXISTS){
 			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a job already existing with that name\n"), JOBNAME(jobName));
 		} else {
-			_ftprintf(stdout, _T("[!] Couldn't create job %s due to an unknown error %d\n"), JOBNAME(jobName), err);
+			_ftprintf(stdout, _T("[!] Couldn't create job %s: error %d\n"), JOBNAME(jobName), err);
 		}
 		goto fail;
 	}
 
 	// assign the job object to ourselves
-	_ftprintf(stdout, _T("[I] Joining current process (%d) into job %s (%#x)\n"), GetCurrentProcessId(), JOBNAME(jobName), (unsigned int)hJob);
+	_ftprintf(stdout, _T("[I] Adding current process (%d) into job %s (%#x)\n"), GetCurrentProcessId(), JOBNAME(jobName), (unsigned int)hJob);
 	if (!AssignProcessToJobObject(hJob, GetCurrentProcess())) {
 		err = GetLastError();
 		if (err == ERROR_ACCESS_DENIED) { // Windows 7 and Server 2008 R2 and below
@@ -429,7 +505,7 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 		if (err = ERROR_FILE_NOT_FOUND) {
 			_ftprintf(stdout, _T("[!] Unable to start process %s due to the file not being found\n"), argv[0]);
 		} else
-			_ftprintf(stdout, _T("[!] Unable to start process %s due to an unknown error %d\n"), argv[0], err);
+			_ftprintf(stdout, _T("[!] Unable to start process %s: error %d\n"), argv[0], err);
 		goto fail;
 	}
 	_ftprintf(stdout, _T("[!] Successfully started process %s: %d\n"), argv[0], GetProcessId(hProcess));
@@ -461,7 +537,8 @@ void PrintHelp(TCHAR *strExe){
 		_ftprintf(stdout, _T("\n"));
 		_ftprintf(stdout, _T(" General Settings / Options:\n"));
 		_ftprintf(stdout, _T("    -g          - Get process list\n"));
-        _ftprintf(stdout, _T("    -c          - Inherit the current console when spawning the child process"));
+		_ftprintf(stdout, _T("    -f          - Force application of job to process ignoring any failures\n"));
+        _ftprintf(stdout, _T("    -c          - Create a new console when spawning the child process"));
 		_ftprintf(stdout, _T("    -P <name>   - Process name to apply the job to\n"));
 		_ftprintf(stdout, _T("    -p <PID>    - PID to apply the job to\n"));
         _ftprintf(stdout, _T("    -n <name>   - What the job will be called (optional)\n"));
@@ -474,9 +551,9 @@ void PrintHelp(TCHAR *strExe){
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_MEMORY
 		_ftprintf(stdout, _T("    -M <bytes>  - Limit the total memory in bytes for each process in the job\n"));
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_JOB_TIME
-		_ftprintf(stdout, _T("    -t <ticks>   - Limit the execution time for the entire job by 100ns ticks\n"));
+		_ftprintf(stdout, _T("    -t <ticks>   - Limit the execution time for the entire job\n"));
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_TIME
-		_ftprintf(stdout, _T("    -T <ticks>   - Limit the execution time for each process in the job by 100ns ticks\n"));
+		_ftprintf(stdout, _T("    -T <ticks>   - Limit the execution time for each process in the job\n"));
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_WORKINGSET
 		_ftprintf(stdout, _T("    -w <min-bytes> - Limit the minimum working set size\n"));
 		_ftprintf(stdout, _T("    -W <max-bytes> - Limit the maximum working set size\n"));
@@ -535,13 +612,17 @@ int _tmain(int argc, TCHAR* argv[])
 
 	// Extract all the options
 	argpos = 1;
-	while ((chOpt = getopt(argc, argv, _T("hcP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) {
+	while ((chOpt = getopt(argc, argv, _T("hfcP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) {
 		switch (chOpt) {
 		case _T('g'):
 			bListProcesses = TRUE;
 			break;
 		case _T('c'):
-			bInheritConsole = TRUE;
+			bCreateConsole = TRUE;
+			break;
+		case _T('f'):
+			bIgnoreJobFailures = TRUE;
+			break;
 		case _T('P'):
 			strProcess = optarg; argpos++;
 			break;
