@@ -627,9 +627,11 @@ int _tmain(int argc, TCHAR* argv[])
 
 	if (strProcess)
 		_ftprintf(stderr, _T("[!] Could not find the process %s\n"), strProcess);
-	else
-		return CreateProcessInJob(strName, cmdv)? 0 : -1;
-		// XXX: Case to handle when a method doesn't exist
-		_ftprintf(stderr, _T("[!] You need to specify a PID or valid process name (use -g to list processes)\n"));
+	else {
+		if (dwProcessLimit)		// add 1 more process to what the user specified, since the current process counts as being part of the job.
+			dwProcessLimit++;
+		return CreateProcessInJob(strName, cmdv) ? 0 : -1;
+	}
+	_ftprintf(stderr, _T("[!] You need to specify a PID or valid process name (use -g to list processes)\n"));
 	return -1;
 }
