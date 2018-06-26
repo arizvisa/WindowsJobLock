@@ -438,24 +438,25 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 	TCHAR strProcName[MAX_PATH];
 
 	if (!FindProcessName(pid, strProcName)) {
-		_ftprintf(stderr,  _T("[!] Could not find the name of the process for PID %d!\n"), pid);
+		_ftprintf(stderr,  _T("[!] Could not find the name of the process: %d\n"), pid);
 		return FALSE;
 	}
 
 	hProcess = OpenProcess(PROCESS_SET_QUOTA|PROCESS_TERMINATE|PROCESS_DUP_HANDLE, false, pid);
 	if(hProcess == NULL || hProcess == INVALID_HANDLE_VALUE){
-		_ftprintf(stderr,  _T("[!] Could not open process %s (PID %d) - %d\n"), strProcName, pid, GetLastError());
+		_ftprintf(stderr,  _T("[!] Could not open process %s (%d): %d\n"), strProcName, pid, GetLastError());
 		return FALSE;
 	}
-	_ftprintf(stdout, _T("[*] Opened process %s\n"), strProcName);
+	_ftprintf(stdout, _T("[*] Opened process %s (%d)..\n"), strProcName, pid);
 
 	PrintSettings(AttachToJob);
 
 	if (!BuildAndDeploy(jobName, strProcName, hProcess)) {
-		_ftprintf(stderr, _T("[!] Failed to build and deploy job object to %s..\n"), strProcName);
+		_ftprintf(stderr, _T("[!] Failed to build and deploy job object to %s (%d)!\n"), strProcName, pid);
+		return FALSE;
 	}
 
-	_ftprintf(stdout, _T("[*] Successfully built and deployed job object to %s!\n"), strProcName);
+	_ftprintf(stdout, _T("[*] Successfully built and deployed job object to %s (%d)!\n"), strProcName, pid);
 	return TRUE;
 }
 
