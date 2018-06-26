@@ -20,6 +20,7 @@ Released under AGPL see LICENSE for more information
 
 // Global
 BOOL bListProcesses = FALSE;
+BOOL bInheritConsole = FALSE;
 DWORD dwProcessLimit = 0;
 DWORD dwJobMemory = 0;
 DWORD dwProcessMemory = 0;
@@ -361,7 +362,7 @@ StartProcess(TCHAR* appname, TCHAR* cmdline)
 
 	// FIXME: use STARTUPINFOEX to inherit just the job handle instead of inheriting all handles
 
-	if (!CreateProcess(appname, cmdline, NULL, NULL, TRUE, CREATE_NEW_PROCESS_GROUP, NULL, NULL, (LPSTARTUPINFOW)&si, &pi))
+	if (!CreateProcess(appname, cmdline, NULL, NULL, TRUE, (bInheritConsole? CREATE_NEW_PROCESS_GROUP : CREATE_NEW_CONSOLE), NULL, NULL, (LPSTARTUPINFOW)&si, &pi))
 		return NULL;
 
 	CloseHandle(pi.hThread);
@@ -460,6 +461,7 @@ void PrintHelp(TCHAR *strExe){
 		_ftprintf(stdout, _T("\n"));
 		_ftprintf(stdout, _T(" General Settings / Options:\n"));
 		_ftprintf(stdout, _T("    -g          - Get process list\n"));
+        _ftprintf(stdout, _T("    -c          - Inherit the current console when spawning the child process"));
 		_ftprintf(stdout, _T("    -P <name>   - Process name to apply the job to\n"));
 		_ftprintf(stdout, _T("    -p <PID>    - PID to apply the job to\n"));
         _ftprintf(stdout, _T("    -n <name>   - What the job will be called (optional)\n"));
@@ -533,11 +535,13 @@ int _tmain(int argc, TCHAR* argv[])
 
 	// Extract all the options
 	argpos = 1;
-	while ((chOpt = getopt(argc, argv, _T("hP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) {
+	while ((chOpt = getopt(argc, argv, _T("hcP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) {
 		switch (chOpt) {
 		case _T('g'):
 			bListProcesses = TRUE;
 			break;
+		case _T('c'):
+			bInheritConsole = TRUE;
 		case _T('P'):
 			strProcess = optarg; argpos++;
 			break;
