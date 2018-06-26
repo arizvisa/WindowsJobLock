@@ -18,21 +18,45 @@ Released under AGPL see LICENSE for more information
 #define JOBNAME(name) (name? name : _T("unnamed"))
 #define TF(expr) ((expr)? _T("True") : _T("False"))
 
+// Miscellaneous constants
+static const size_t PageSize = 1 << 12;
+static const size_t WorkingSetSize_Minimum = PageSize * 20;
+static const size_t WorkingSetSize_Maximum = ~1;
+
+// Miscellaneous definitions
+enum PrintSettings_enum {
+	AttachToJob,
+	CreateInJob,
+};
+
 // Global
 BOOL bListProcesses = FALSE;
 BOOL bCreateConsole = FALSE;
 BOOL bIgnoreJobFailures = FALSE;
-DWORD dwProcessLimit = 0;
-DWORD dwJobMemory = 0;
-DWORD dwProcessMemory = 0;
-LARGE_INTEGER dwProcessTicksLimit = { 0 };
-LARGE_INTEGER dwJobTicksLimit = { 0 };
-SIZE_T dwMinimumWorkingSetSize = -1;
-SIZE_T dwMaximumWorkingSetSize = -1;
 struct {
+	BOOL dwProcessLimitQ;
+	BOOL dwProcessTicksLimitQ;
+	BOOL dwJobTicksLimitQ;
+	BOOL dwMinimumWorkingSetSizeQ;
+	BOOL dwMaximumWorkingSetSizeQ;
+
+	DWORD dwProcessLimit;
+	LARGE_INTEGER dwProcessTicksLimit;
+	LARGE_INTEGER dwJobTicksLimit;
+	SIZE_T dwMinimumWorkingSetSize;
+	SIZE_T dwMaximumWorkingSetSize;
 	BOOL  bKillProcOnJobClose;
 	BOOL  bBreakAwayOK;
 	BOOL  bSilentBreakAwayOK;
+} Basic = { FALSE, FALSE, FALSE, FALSE, FALSE, 0, { 0 }, { 0 }, (SIZE_T)-1, (SIZE_T)-1, FALSE, FALSE, FALSE };
+struct {
+	BOOL dwJobMemoryQ;
+	BOOL dwProcessMemoryQ;
+
+	DWORD dwJobMemory;
+	DWORD dwProcessMemory;
+} Extended = { FALSE, FALSE, 0, 0 };
+struct {
 	BOOL  bUILimitDesktop;
 	BOOL  bUILimitDispSettings;
 	BOOL  bUILimitExitWindows;
@@ -41,7 +65,7 @@ struct {
 	BOOL  bUILimitReadClip;
 	BOOL  bUILimitSystemParams;
 	BOOL  bUILimitWriteClip;
-} UI = { FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE };
+} UI = { FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE, FALSE };
 
 //
 // Function	: FindProcess
@@ -100,6 +124,148 @@ BOOL FindProcessName(DWORD dwPID, TCHAR *strName)
 	return FALSE;
 }
 
+BOOL
+InitializeJobObject_BasicLimitInformation(struct _JOBOBJECT_BASIC_LIMIT_INFORMATION* jbli)
+{
+	BOOL result = FALSE;
+	jbli->LimitFlags = 0;
+
+	if (Basic.dwProcessLimitQ) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
+		jbli->ActiveProcessLimit = Basic.dwProcessLimit + 1;
+		result = TRUE;
+	}
+
+	if (Basic.dwJobTicksLimitQ) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+		jbli->PerJobUserTimeLimit = Basic.dwProcessTicksLimit;
+		result = TRUE;
+	}
+
+	if (Basic.dwProcessTicksLimitQ) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+		jbli->PerProcessUserTimeLimit = Basic.dwProcessTicksLimit;
+		result = TRUE;
+	}
+
+	// FIXME: This probably needs the PROCESS_SET_QUOTA privilege
+	if (Basic.dwMinimumWorkingSetSizeQ) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
+
+		if (Basic.dwMinimumWorkingSetSize < WorkingSetSize_Minimum) {
+			_ftprintf(stdout, _T("[!] Requested Minimum Working Set Size (%d pages) is less than the minimum (%d pages). Using %d bytes instead.\n"), Basic.dwMinimumWorkingSetSize / PageSize, WorkingSetSize_Minimum / PageSize, WorkingSetSize_Minimum);
+			jbli->MinimumWorkingSetSize = WorkingSetSize_Minimum;
+		} else
+			jbli->MinimumWorkingSetSize = Basic.dwMinimumWorkingSetSize;
+
+		if (Basic.dwMaximumWorkingSetSize == -1)
+			jbli->MaximumWorkingSetSize = WorkingSetSize_Maximum;
+		result = TRUE;
+	}
+
+	// FIXME: This probably needs the PROCESS_SET_QUOTA privilege
+	if (Basic.dwMaximumWorkingSetSizeQ) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
+		if (Basic.dwMaximumWorkingSetSize < WorkingSetSize_Maximum)
+			jbli->MaximumWorkingSetSize = Basic.dwMaximumWorkingSetSize;
+		else {
+			_ftprintf(stdout, _T("[!] Requested Maximum Working Set Size (%d pages) is larger than the maximum (%d pages). Using %d bytes instead.\n"), Basic.dwMaximumWorkingSetSize / PageSize, WorkingSetSize_Maximum / PageSize, WorkingSetSize_Maximum);
+			jbli->MaximumWorkingSetSize = WorkingSetSize_Maximum;
+
+		}
+		if (Basic.dwMinimumWorkingSetSize == -1)
+			jbli->MinimumWorkingSetSize = WorkingSetSize_Minimum;
+		result = TRUE;
+	}
+
+	if (Basic.bKillProcOnJobClose) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+		result = TRUE;
+	}
+
+	if (Basic.bBreakAwayOK) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+		result = TRUE;
+	}
+
+	if (Basic.bSilentBreakAwayOK) {
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
+		result = TRUE;
+	}
+
+	return result;
+}
+
+BOOL
+InitializeJobObject_ExtendedLimitInformation(struct _JOBOBJECT_EXTENDED_LIMIT_INFORMATION* jeli)
+{
+	BOOL result = FALSE;
+	jeli->BasicLimitInformation.LimitFlags = 0;
+
+	if (Extended.dwJobMemoryQ) {
+		result = TRUE;
+		jeli->BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
+		jeli->JobMemoryLimit = Extended.dwJobMemory;
+	}
+
+	if (Extended.dwProcessMemoryQ) {
+		result = TRUE;
+		jeli->BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
+		jeli->ProcessMemoryLimit = Extended.dwProcessMemory;
+	}
+
+	return result;
+}
+
+BOOL
+InitializeJobObject_BasicUIRestrictions(struct _JOBOBJECT_BASIC_UI_RESTRICTIONS* jbur)
+{
+	BOOL result = FALSE;
+	jbur->UIRestrictionsClass = 0;
+
+	if (UI.bUILimitDesktop) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DESKTOP;
+	}
+
+	if (UI.bUILimitDispSettings) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DISPLAYSETTINGS;
+	}
+
+	if (UI.bUILimitExitWindows) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_EXITWINDOWS;
+	}
+
+	if (UI.bUILimitGlobalAtoms) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_GLOBALATOMS;
+	}
+
+	if (UI.bUILimitUserHandles) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_HANDLES;
+	}
+
+	if (UI.bUILimitReadClip) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_READCLIPBOARD;
+	}
+
+	if (UI.bUILimitSystemParams) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS;
+	}
+
+	if (UI.bUILimitWriteClip) {
+		result = TRUE;
+		jbur->UIRestrictionsClass |= JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
+	}
+
+	return result;
+}
+
 HANDLE
 InitializeJobObject(TCHAR* jobName)
 {
@@ -128,118 +294,30 @@ InitializeJobObject(TCHAR* jobName)
 		goto fail;
 
 	// populate the job-specific structures using globals initialized by getopt
-	if (dwProcessLimit) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_ACTIVE_PROCESS;
-		jblInfo.ActiveProcessLimit = dwProcessLimit;
-	}
-
-	if (dwJobMemory) {
-		jobRequired.extended = TRUE;
-		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY;
-		jelInfo.JobMemoryLimit = dwJobMemory;
-	}
-
-	if (dwProcessMemory) {
-		jobRequired.extended = TRUE;
-		jelInfo.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_MEMORY;
-		jelInfo.ProcessMemoryLimit = dwProcessMemory;
-	}
-
-	if (dwJobTicksLimit.QuadPart) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
-		jblInfo.PerJobUserTimeLimit = dwProcessTicksLimit;
-	}
-
-	if (dwProcessTicksLimit.QuadPart) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
-		jblInfo.PerProcessUserTimeLimit = dwProcessTicksLimit;
-	}
-
-	if (dwMinimumWorkingSetSize != -1) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
-		jblInfo.MinimumWorkingSetSize = dwMinimumWorkingSetSize;
-		if (dwMaximumWorkingSetSize == -1)
-			jblInfo.MaximumWorkingSetSize = MAXSIZE_T;
-	}
-
-	if (dwMaximumWorkingSetSize != -1) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
-		if (dwMinimumWorkingSetSize == -1)
-			jblInfo.MinimumWorkingSetSize = 1;
-		jblInfo.MaximumWorkingSetSize = dwMaximumWorkingSetSize;
-	}
-
-	if (UI.bKillProcOnJobClose) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
-	}
-	if (UI.bBreakAwayOK) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_BREAKAWAY_OK;
-	}
-	if (UI.bSilentBreakAwayOK) {
-		jobRequired.basic = TRUE;
-		jblInfo.LimitFlags |= JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK;
-	}
-
-	if (UI.bUILimitDesktop) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DESKTOP;
-	}
-	if (UI.bUILimitDispSettings) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_DISPLAYSETTINGS;
-	}
-	if (UI.bUILimitExitWindows) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_EXITWINDOWS;
-	}
-	if (UI.bUILimitGlobalAtoms) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_GLOBALATOMS;
-	}
-	if (UI.bUILimitUserHandles) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_HANDLES;
-	}
-	if (UI.bUILimitReadClip) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_READCLIPBOARD;
-	}
-	if (UI.bUILimitSystemParams) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS;
-	}
-	if (UI.bUILimitWriteClip) {
-		jobRequired.ui = TRUE;
-		jbuiRestrictions.UIRestrictionsClass |= JOB_OBJECT_UILIMIT_WRITECLIPBOARD;
-	}
+	jobRequired.basic = InitializeJobObject_BasicLimitInformation(&jblInfo);
+	jobRequired.extended = InitializeJobObject_ExtendedLimitInformation(&jelInfo);
+	jobRequired.ui = InitializeJobObject_BasicUIRestrictions(&jbuiRestrictions);
 
 	// Now we can set these structures to the job object
-	if (!SetInformationJobObject(hJob, JobObjectBasicLimitInformation, &jblInfo, sizeof(jblInfo))) {
+	if (jobRequired.basic && !SetInformationJobObject(hJob, JobObjectBasicLimitInformation, &jblInfo, sizeof(jblInfo))) {
 		_ftprintf(stdout, _T("[!] Couldn't set job basic limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
 		jobSuccess.basic = FALSE;
 	}
-	else
+	else if (jobRequired.basic)
 		_ftprintf(stdout, _T("[*] Applied job basic limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
 
-	if (!SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jelInfo, sizeof(jelInfo))) {
+	if (jobRequired.extended && !SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jelInfo, sizeof(jelInfo))) {
 		_ftprintf(stdout, _T("[!] Couldn't set job extended limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
 		jobSuccess.extended = FALSE;
 	}
-	else
+	else if (jobRequired.extended)
 		_ftprintf(stdout, _T("[*] Applied job extended limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
 
-	if (!SetInformationJobObject(hJob, JobObjectBasicUIRestrictions, &jbuiRestrictions, sizeof(jbuiRestrictions))) {
+	if (jobRequired.ui && !SetInformationJobObject(hJob, JobObjectBasicUIRestrictions, &jbuiRestrictions, sizeof(jbuiRestrictions))) {
 		_ftprintf(stdout, _T("[!] Couldn't set job UI limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
 		jobSuccess.ui = FALSE;
 	}
-	else
+	else if (jobRequired.ui)
 		_ftprintf(stdout, _T("[*] Applied job UI limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
 
 	// Check if everything failed, and fail if so.
@@ -318,18 +396,31 @@ BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 // Function	: PrintSettings
 // Purpose	: Print the settings we will apply
 //
-void PrintSettings()
+void PrintSettings(enum PrintSettings_enum fmt)
 {
-	_ftprintf(stdout, _T("[I] Process Limit                 - %s - %d\n"), TF(dwProcessLimit > 0), dwProcessLimit);
-	_ftprintf(stdout, _T("[I] Job Memory Limit              - %s - %d\n"), TF(dwJobMemory > 0), dwJobMemory);
-	_ftprintf(stdout, _T("[I] Process Memory Limit          - %s - %d\n"), TF(dwProcessMemory > 0), dwProcessMemory);
-	_ftprintf(stdout, _T("[I] Job Execution Time Limit      - %s - %lld\n"), TF(dwJobTicksLimit.QuadPart > 0), dwJobTicksLimit.QuadPart);
-	_ftprintf(stdout, _T("[I] Process Execution Time Limit  - %s - %lld\n"), TF(dwProcessTicksLimit.QuadPart > 0), dwProcessTicksLimit.QuadPart);
-	_ftprintf(stdout, _T("[I] Minimum Working Set Limit     - %s - %d\n"), TF(dwMinimumWorkingSetSize > -1), dwMinimumWorkingSetSize);
-	_ftprintf(stdout, _T("[I] Maximum Working Set Limti     - %s - %d\n"), TF(dwMaximumWorkingSetSize > -1), dwMaximumWorkingSetSize);
-	_ftprintf(stdout, _T("[I] Kill Process on Job Close     - %s\n"), TF(UI.bKillProcOnJobClose == TRUE));
-	_ftprintf(stdout, _T("[I] Break Away from Job OK        - %s\n"), TF(UI.bBreakAwayOK == TRUE));
-	_ftprintf(stdout, _T("[I] Silent Break Away from Job OK - %s\n"), TF(UI.bSilentBreakAwayOK == TRUE));
+	DWORD processLimit = Basic.dwProcessLimit;
+
+	// figure out how the process limit should be outputted
+	if (fmt == CreateInJob)
+		processLimit = Basic.dwProcessLimit - 1;
+	else if (fmt == AttachToJob)
+		processLimit = Basic.dwProcessLimit;
+
+	if (Basic.dwProcessLimitQ)
+		_ftprintf(stdout, _T("[I] Process Limit                 - %s - %d+%d child%s\n"), TF(Basic.dwProcessLimitQ), 1, processLimit, (processLimit == 1)? _T("") : _T("ren"));
+	else
+		_ftprintf(stdout, _T("[I] Process Limit                 - %s - %d process%s\n"), TF(Basic.dwProcessLimitQ), processLimit, (processLimit == 1)? _T("") : _T("es"));
+
+	// continue on with the rest of the configuration
+	_ftprintf(stdout, _T("[I] Job Memory Limit              - %s - %d byte(s)\n"), TF(Extended.dwJobMemoryQ), Extended.dwJobMemory);
+	_ftprintf(stdout, _T("[I] Process Memory Limit          - %s - %d byte(s)\n"), TF(Extended.dwProcessMemoryQ), Extended.dwProcessMemory);
+	_ftprintf(stdout, _T("[I] Job Execution Time Limit      - %s - %lld second(s)\n"), TF(Basic.dwJobTicksLimitQ), Basic.dwJobTicksLimit.QuadPart);
+	_ftprintf(stdout, _T("[I] Process Execution Time Limit  - %s - %lld second(s)\n"), TF(Basic.dwProcessTicksLimitQ), Basic.dwProcessTicksLimit.QuadPart);
+	_ftprintf(stdout, _T("[I] Minimum Working Set Limit     - %s - %d byte(s)\n"), TF(Basic.dwMinimumWorkingSetSizeQ), Basic.dwMinimumWorkingSetSize);
+	_ftprintf(stdout, _T("[I] Maximum Working Set Limit     - %s - %d byte(s)\n"), TF(Basic.dwMaximumWorkingSetSizeQ), Basic.dwMaximumWorkingSetSize);
+	_ftprintf(stdout, _T("[I] Kill Process on Job Close     - %s\n"), TF(Basic.bKillProcOnJobClose == TRUE));
+	_ftprintf(stdout, _T("[I] Break Away from Job OK        - %s\n"), TF(Basic.bBreakAwayOK == TRUE));
+	_ftprintf(stdout, _T("[I] Silent Break Away from Job OK - %s\n"), TF(Basic.bSilentBreakAwayOK == TRUE));
 	_ftprintf(stdout, _T("[I] Limit Desktop Operations      - %s\n"), TF(UI.bUILimitDesktop == TRUE));
 	_ftprintf(stdout, _T("[I] Limit Display Changes         - %s\n"), TF(UI.bUILimitDispSettings == TRUE));
 	_ftprintf(stdout, _T("[I] Limit Exit Windows            - %s\n"), TF(UI.bUILimitExitWindows == TRUE));
@@ -358,7 +449,7 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 	}
 	_ftprintf(stdout, _T("[*] Opened process %s\n"), strProcName);
 
-	PrintSettings();
+	PrintSettings(AttachToJob);
 
 	if (!BuildAndDeploy(jobName, strProcName, hProcess)) {
 		_ftprintf(stderr, _T("[!] Failed to build and deploy job object to %s..\n"), strProcName);
@@ -462,8 +553,13 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 		_tcscat_s(strFinalName, MAX_PATH, jobName);
 	}
 
+	// if a process limit was specified, then add 1 more process to it
+	// since the current process is included in the count.
+	if (Basic.dwProcessLimitQ)
+		Basic.dwProcessLimit++;
+
 	// output the settings
-	PrintSettings();
+	PrintSettings(CreateInJob);
 
 	// initialize a job object with the requested name
 	hJob = InitializeJobObject((jobName == NULL) ? NULL : strFinalName);
@@ -554,40 +650,40 @@ void PrintHelp(TCHAR *strExe){
 		_ftprintf(stdout, _T("    -t <ticks>   - Limit the execution time for the entire job\n"));
 		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_TIME
 		_ftprintf(stdout, _T("    -T <ticks>   - Limit the execution time for each process in the job\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_WORKINGSET
-		_ftprintf(stdout, _T("    -w <min-bytes> - Limit the minimum working set size\n"));
-		_ftprintf(stdout, _T("    -W <max-bytes> - Limit the maximum working set size\n"));
-		_ftprintf(stdout, _T(" Process Control:\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-        _ftprintf(stdout, _T("    -k          - Kill all process when the job handle dies\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_BREAKAWAY_OK
-		_ftprintf(stdout, _T("    -B          - Allow child process to be created with CREATE_BREAKAWAY_FROM_JOB (weak security)\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
-		_ftprintf(stdout, _T("    -b          - Allow child process which aren't part of the job (weak security)\n"));
-		_ftprintf(stdout, _T(" UI Security Controls (should be combined as a single parameter to -u):\n"));
-		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DESKTOP
-        _ftprintf(stdout, _T("    -u d        - Prevent processes within the job from switching or creating desktops\n"));
-		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
-        _ftprintf(stdout, _T("    -u D        - Prevent processes within the job from calling the change display setting function\n"));
-        // JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_EXITWINDOWS
-		_ftprintf(stdout, _T("    -u x        - Prevent processes within job from calling the exit Windows function\n"));
-		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_GLOBALATOMS
-		_ftprintf(stdout, _T("    -u a        - Prevent processes within job from accessing global atoms\n"));
-		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_HANDLES
-		_ftprintf(stdout, _T("    -u u        - Prevent processes within job from using user handles\n"));
-		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_READCLIPBOARD
-		_ftprintf(stdout, _T("    -u c        - Prevent processes within job from reading the clipboard\n"));
-		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
-		_ftprintf(stdout, _T("    -u s        - Prevent processes within job from changing system parameters\n"));
-		// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_WRITECLIPBOARD
-		_ftprintf(stdout, _T("    -u C        - Prevent processes within job from writing the clipboard\n"));
-		// JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
-		// JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
-		// JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-		// JOBOBJECT_NOTIFICATION_LIMIT_INFORMATION
+// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_WORKINGSET
+_ftprintf(stdout, _T("    -w <min-bytes> - Limit the minimum working set size\n"));
+_ftprintf(stdout, _T("    -W <max-bytes> - Limit the maximum working set size\n"));
+_ftprintf(stdout, _T(" Process Control (should be combined as a single parameter to -b):\n"));
+// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+_ftprintf(stdout, _T("    -b k        - Kill all process when the job handle dies\n"));
+// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_BREAKAWAY_OK
+_ftprintf(stdout, _T("    -b B        - Allow child process to be created with CREATE_BREAKAWAY_FROM_JOB (weak security)\n"));
+// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+_ftprintf(stdout, _T("    -b b        - Allow child process which aren't part of the job (weak security)\n"));
+_ftprintf(stdout, _T(" UI Security Controls (should be combined as a single parameter to -u):\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DESKTOP
+_ftprintf(stdout, _T("    -u d        - Prevent processes within the job from switching or creating desktops\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
+_ftprintf(stdout, _T("    -u D        - Prevent processes within the job from calling the change display setting function\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_EXITWINDOWS
+_ftprintf(stdout, _T("    -u x        - Prevent processes within job from calling the exit Windows function\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_GLOBALATOMS
+_ftprintf(stdout, _T("    -u a        - Prevent processes within job from accessing global atoms\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_HANDLES
+_ftprintf(stdout, _T("    -u u        - Prevent processes within job from using user handles\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_READCLIPBOARD
+_ftprintf(stdout, _T("    -u c        - Prevent processes within job from reading the clipboard\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
+_ftprintf(stdout, _T("    -u s        - Prevent processes within job from changing system parameters\n"));
+// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_WRITECLIPBOARD
+_ftprintf(stdout, _T("    -u C        - Prevent processes within job from writing the clipboard\n"));
+// FIXME: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
+// FIXME: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
+// JOBOBJECT_EXTENDED_LIMIT_INFORMATION
+// JOBOBJECT_NOTIFICATION_LIMIT_INFORMATION
 
-		_ftprintf(stdout, _T("\n"));
-        ExitProcess(1);
+_ftprintf(stdout, _T("\n"));
+ExitProcess(1);
 }
 
 
@@ -612,7 +708,7 @@ int _tmain(int argc, TCHAR* argv[])
 
 	// Extract all the options
 	argpos = 1;
-	while ((chOpt = getopt(argc, argv, _T("hfcP:p:l:m:M:n:t:T:w:W:u:g"))) != EOF) {
+	while ((chOpt = getopt(argc, argv, _T("gh fc P:p:l:m:M:n:t:T:w:W:u:b:"))) != EOF) {
 		switch (chOpt) {
 		case _T('g'):
 			bListProcesses = TRUE;
@@ -630,36 +726,46 @@ int _tmain(int argc, TCHAR* argv[])
 			dwPID = _tstoi(optarg); argpos++;
 			break;
 		case _T('l'):
-			dwProcessLimit = _tstoi(optarg); argpos++;
+			Basic.dwProcessLimitQ = TRUE;
+			Basic.dwProcessLimit = _tstoi(optarg); argpos++;
 			break;
 		case _T('m'):
-			dwJobMemory = _tstoi(optarg); argpos++;
+			Extended.dwJobMemoryQ = TRUE;
+			Extended.dwJobMemory = _tstoi(optarg); argpos++;
 			break;
 		case _T('M'):
-			dwProcessMemory = _tstoi(optarg); argpos++;
+			Extended.dwProcessMemoryQ = TRUE;
+			Extended.dwProcessMemory = _tstoi(optarg); argpos++;
 			break;
 		case _T('t'):
-			dwJobTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
+			Basic.dwJobTicksLimitQ = TRUE;
+			Basic.dwJobTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
 			break;
 		case _T('T'):
-			dwProcessTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
+			Basic.dwProcessTicksLimitQ = TRUE;
+			Basic.dwProcessTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
 			break;
 		case _T('w'):
-			dwMinimumWorkingSetSize = _tstoi(optarg); argpos++;
+			Basic.dwMinimumWorkingSetSizeQ = TRUE;
+			Basic.dwMinimumWorkingSetSize = _tstoi(optarg); argpos++;
 			break;
 		case _T('W'):
-			dwMaximumWorkingSetSize = _tstoi(optarg); argpos++;
+			Basic.dwMaximumWorkingSetSizeQ = TRUE;
+			Basic.dwMaximumWorkingSetSize = _tstoi(optarg); argpos++;
 			break;
 		case _T('n'):
 			strName = optarg; argpos++;
 			break;
-		case _T('u'):
+		case  _T('b'):
 			if (_tcsstr(optarg, _T("k")))
-				UI.bKillProcOnJobClose = TRUE;
+				Basic.bKillProcOnJobClose = TRUE;
 			if (_tcsstr(optarg, _T("B")))
-				UI.bBreakAwayOK = TRUE;
+				Basic.bBreakAwayOK = TRUE;
 			if (_tcsstr(optarg, _T("b")))
-				UI.bSilentBreakAwayOK = TRUE;
+				Basic.bSilentBreakAwayOK = TRUE;
+			argpos++;
+			break;
+		case _T('u'):
 			if (_tcsstr(optarg, _T("d")))
 				UI.bUILimitDesktop = TRUE;
 			if (_tcsstr(optarg, _T("D")))
@@ -713,8 +819,6 @@ int _tmain(int argc, TCHAR* argv[])
 	if (strProcess)
 		_ftprintf(stderr, _T("[!] Could not find the process %s\n"), strProcess);
 	else {
-		if (dwProcessLimit)		// add 1 more process to what the user specified, since the current process counts as being part of the job.
-			dwProcessLimit++;
 		return CreateProcessInJob(strName, cmdv) ? 0 : -1;
 	}
 	_ftprintf(stderr, _T("[!] You need to specify a PID or valid process name (use -g to list processes)\n"));
