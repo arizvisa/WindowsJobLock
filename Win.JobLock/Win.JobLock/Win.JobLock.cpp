@@ -98,7 +98,7 @@ ListProcesses()
 		return;
 
 	for(dwCount=0; dwCount<dwRet; dwCount++)
-		_ftprintf(stdout, _T("[I] %s (%d) in session %d\n"), ppProcessInfo[dwCount].pProcessName, ppProcessInfo[dwCount].ProcessId, ppProcessInfo[dwCount].SessionId);
+		_ftprintf(stdout, _T("[I] %s (%d) in session %d.\n"), ppProcessInfo[dwCount].pProcessName, ppProcessInfo[dwCount].ProcessId, ppProcessInfo[dwCount].SessionId);
 
 	return;
 }
@@ -122,6 +122,48 @@ BOOL FindProcessName(DWORD dwPID, TCHAR *strName)
 		}
 	}
 	return FALSE;
+}
+
+BOOL
+SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
+{
+	// Copied and formatted from: https://docs.microsoft.com/en-us/windows/desktop/SecAuthZ/enabling-and-disabling-privileges-in-c--P
+    TOKEN_PRIVILEGES tp;
+    LUID luid;
+
+    if (!LookupPrivilegeValue(NULL, lpszPrivilege, &luid))
+        return FALSE;
+
+    tp.PrivilegeCount = 1;
+    tp.Privileges[0].Luid = luid;
+    if (bEnablePrivilege)
+        tp.Privileges[0].Attributes = SE_PRIVILEGE_ENABLED;
+    else
+        tp.Privileges[0].Attributes = 0;
+
+    // Enable the privilege or disable all privileges.
+    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL))
+          return FALSE;
+
+    return (GetLastError() == ERROR_NOT_ALL_ASSIGNED)? FALSE : TRUE;
+}
+
+BOOL
+RequestNecessaryPrivileges(HANDLE hProcess)
+{
+	HANDLE hToken = NULL;
+
+	if (!OpenProcessToken(hProcess, TOKEN_ADJUST_PRIVILEGES, &hToken))
+		return FALSE;
+
+	if (!SetPrivilege(hToken, SE_INCREASE_QUOTA_NAME, TRUE))
+		_ftprintf(stdout, _T("[!] Unable to set token privilege (%s) to process %d: error %d\n"), _T("SE_INCREASE_QUOTA_NAME"), GetProcessId(hProcess), GetLastError());
+
+	if (!SetPrivilege(hToken, SE_INC_WORKING_SET_NAME, TRUE))
+		_ftprintf(stdout, _T("[!] Unable to set token privilege (%s) to process %d: error %d\n"), _T("SE_INC_WORKING_SET_NAME"), GetProcessId(hProcess), GetLastError());
+
+	CloseHandle(hToken);
+	return TRUE;
 }
 
 BOOL
@@ -304,33 +346,33 @@ InitializeJobObject(TCHAR* jobName)
 		jobSuccess.basic = FALSE;
 	}
 	else if (jobRequired.basic)
-		_ftprintf(stdout, _T("[*] Applied job basic limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
+		_ftprintf(stdout, _T("[*] Applied job basic limits to job %s (%#x).\n"), JOBNAME(jobName), (unsigned int)hJob);
 
 	if (jobRequired.extended && !SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jelInfo, sizeof(jelInfo))) {
 		_ftprintf(stdout, _T("[!] Couldn't set job extended limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
 		jobSuccess.extended = FALSE;
 	}
 	else if (jobRequired.extended)
-		_ftprintf(stdout, _T("[*] Applied job extended limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
+		_ftprintf(stdout, _T("[*] Applied job extended limits to job %s (%#x).\n"), JOBNAME(jobName), (unsigned int)hJob);
 
 	if (jobRequired.ui && !SetInformationJobObject(hJob, JobObjectBasicUIRestrictions, &jbuiRestrictions, sizeof(jbuiRestrictions))) {
 		_ftprintf(stdout, _T("[!] Couldn't set job UI limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned int)hJob, GetLastError());
 		jobSuccess.ui = FALSE;
 	}
 	else if (jobRequired.ui)
-		_ftprintf(stdout, _T("[*] Applied job UI limits to job %s (%#x)\n"), JOBNAME(jobName), (unsigned int)hJob);
+		_ftprintf(stdout, _T("[*] Applied job UI limits to job %s (%#x).\n"), JOBNAME(jobName), (unsigned int)hJob);
 
 	// Check if everything failed, and fail if so.
 	if (!bIgnoreJobFailures && (!jobSuccess.basic && jobRequired.basic)) {
-		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)\n"), _T("basic"), JOBNAME(jobName), GetLastError());
+		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)!\n"), _T("basic"), JOBNAME(jobName), GetLastError());
 		goto fail;
 	}
 	if (!bIgnoreJobFailures && (!jobSuccess.extended && jobRequired.extended)) {
-		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)\n"), _T("extended"), JOBNAME(jobName), GetLastError());
+		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)!\n"), _T("extended"), JOBNAME(jobName), GetLastError());
 		goto fail;
 	}
 	if (!bIgnoreJobFailures && (!jobSuccess.ui && jobRequired.ui)) {
-		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)\n"), _T("ui"), JOBNAME(jobName), GetLastError());
+		_ftprintf(stdout, _T("[!] Unable to set required limits (%s) for job %s (%#x)!\n"), _T("ui"), JOBNAME(jobName), GetLastError());
 		goto fail;
 	}
 
@@ -356,14 +398,20 @@ BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 		_tcscat_s(strFinalName, MAX_PATH, jobName);
 	}
 
+	// Request any required privileges
+	if (!RequestNecessaryPrivileges(GetCurrentProcess())) {
+		_ftprintf(stdout, _T("[!] Unable to request privileges to specify quotas: error %d\n"), GetLastError());
+		return FALSE;
+	}
+
 	// Initialize a Job object using the arguments the user specified
 	hJob = InitializeJobObject((jobName == NULL)? NULL : strFinalName);
 	if (hJob == NULL) {
 		err = GetLastError();
 		if (err ==  ERROR_INVALID_HANDLE) {
-			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a object name conflict\n"), JOBNAME(jobName));
+			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a object name conflict!\n"), JOBNAME(jobName));
 		} else if (err == ERROR_ALREADY_EXISTS) {
-			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a job already existing with that name\n"), JOBNAME(jobName));
+			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a job already existing with that name!\n"), JOBNAME(jobName));
 		} else {
 			_ftprintf(stdout, _T("[!] Couldn't create job %s: error %d\n"), JOBNAME(jobName), err);
 		}
@@ -382,7 +430,7 @@ BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 	if(!AssignProcessToJobObject(hJob,hProcess)){
 		err = GetLastError();
 		if (err == ERROR_ACCESS_DENIED) { // Windows 7 and Server 2008 R2 and below
-			_ftprintf(stdout, _T("[!] Couldn't apply job object to %s Looks like a job object has already been applied\n"), strProcess);
+			_ftprintf(stdout, _T("[!] Couldn't apply job object to %s as it looks like a job object has already been applied!\n"), strProcess);
 			return FALSE;
 		} else
 			_ftprintf(stdout, _T("[!] Couldn't apply job object to %s: error %d\n"), strProcess, err);
@@ -438,21 +486,21 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 	TCHAR strProcName[MAX_PATH];
 
 	if (!FindProcessName(pid, strProcName)) {
-		_ftprintf(stderr,  _T("[!] Could not find the name of the process: %d\n"), pid);
+		_ftprintf(stdout,  _T("[!] Could not find the name of the process: pid %d\n"), pid);
 		return FALSE;
 	}
 
 	hProcess = OpenProcess(PROCESS_SET_QUOTA|PROCESS_TERMINATE|PROCESS_DUP_HANDLE, false, pid);
 	if(hProcess == NULL || hProcess == INVALID_HANDLE_VALUE){
-		_ftprintf(stderr,  _T("[!] Could not open process %s (%d): %d\n"), strProcName, pid, GetLastError());
+		_ftprintf(stdout,  _T("[!] Could not open process %s (%d): error %d\n"), strProcName, pid, GetLastError());
 		return FALSE;
 	}
-	_ftprintf(stdout, _T("[*] Opened process %s (%d)..\n"), strProcName, pid);
+	_ftprintf(stdout, _T("[*] Successfully opened process %s (%d)!\n"), strProcName, pid);
 
 	PrintSettings(AttachToJob);
 
 	if (!BuildAndDeploy(jobName, strProcName, hProcess)) {
-		_ftprintf(stderr, _T("[!] Failed to build and deploy job object to %s (%d)!\n"), strProcName, pid);
+		_ftprintf(stdout, _T("[!] Failed to build and deploy job object to %s (%d)!\n"), strProcName, pid);
 		return FALSE;
 	}
 
@@ -562,14 +610,20 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 	// output the settings
 	PrintSettings(CreateInJob);
 
+	// Request any required privileges
+	if (!RequestNecessaryPrivileges(GetCurrentProcess())) {
+		_ftprintf(stdout, _T("[!] Unable to request privileges to specify quotas: error %d\n"), GetLastError());
+		goto fail;
+	}
+
 	// initialize a job object with the requested name
 	hJob = InitializeJobObject((jobName == NULL) ? NULL : strFinalName);
 	if (hJob == NULL) {
 		err = GetLastError();
 		if(err == ERROR_INVALID_HANDLE){
-			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a object name conflict\n"), JOBNAME(jobName));
+			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a object name conflict!\n"), JOBNAME(jobName));
 		} else if (err == ERROR_ALREADY_EXISTS){
-			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a job already existing with that name\n"), JOBNAME(jobName));
+			_ftprintf(stdout, _T("[!] Couldn't create job %s due to a job already existing with that name!\n"), JOBNAME(jobName));
 		} else {
 			_ftprintf(stdout, _T("[!] Couldn't create job %s: error %d\n"), JOBNAME(jobName), err);
 		}
@@ -581,15 +635,15 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 	if (!AssignProcessToJobObject(hJob, GetCurrentProcess())) {
 		err = GetLastError();
 		if (err == ERROR_ACCESS_DENIED) { // Windows 7 and Server 2008 R2 and below
-			_ftprintf(stdout, _T("[!] Couldn't apply job object to ourselves Looks like a job object has already been applied\n"));
+			_ftprintf(stdout, _T("[!] Couldn't apply job object to self as it looks like a job object has already been applied!\n"));
 		} else
-			_ftprintf(stdout, _T("[!] Couldn't apply job object to ourselves an error %d\n"), err);
+			_ftprintf(stdout, _T("[!] Couldn't apply job object to self: error %d\n"), err);
 		goto fail;
 	}
 
 	// construct the commandline for create process (ArgvToCommandLine)
 	if (!ArgvToCommandLine(argv, cmdline, UNICODE_STRING_MAX_CHARS)) {
-		_ftprintf(stdout, _T("[!] Unable to convert arguments into a regular commandline\n"));
+		_ftprintf(stdout, _T("[!] Unable to convert arguments into a regular commandline!\n"));
 		goto fail;
 	}
 
@@ -600,17 +654,17 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 	if (hProcess == NULL) {
 		err = GetLastError();
 		if (err = ERROR_FILE_NOT_FOUND) {
-			_ftprintf(stdout, _T("[!] Unable to start process %s due to the file not being found\n"), argv[0]);
+			_ftprintf(stdout, _T("[!] Unable to start process %s due to the file not being found!\n"), argv[0]);
 		} else
 			_ftprintf(stdout, _T("[!] Unable to start process %s: error %d\n"), argv[0], err);
 		goto fail;
 	}
-	_ftprintf(stdout, _T("[!] Successfully started process %s: %d\n"), argv[0], GetProcessId(hProcess));
+	_ftprintf(stdout, _T("[!] Successfully started process %s: %d!\n"), argv[0], GetProcessId(hProcess));
 
 	// wait until the process has actually started
 	if (WaitForInputIdle(hProcess, INFINITE))
 		goto fail;
-	_ftprintf(stdout, _T("[!] Process %s (%d) is ready\n"), argv[0], GetProcessId(hProcess));
+	_ftprintf(stdout, _T("[!] Process %s (%d) is ready.\n"), argv[0], GetProcessId(hProcess));
 
 	// we should be done and good to go
 	CloseHandle(hProcess);
@@ -792,7 +846,7 @@ int _tmain(int argc, TCHAR* argv[])
 			PrintHelp(argv[0]);
 			return EXIT_SUCCESS;
 		default:
-			_ftprintf(stderr, _T("[!] No handler - %s\n"), argv[argpos]);
+			_ftprintf(stdout, _T("[!] No handler - %s\n"), argv[argpos]);
 			break;
 		}
 		argpos++;
@@ -812,6 +866,8 @@ int _tmain(int argc, TCHAR* argv[])
 		ListProcesses();
 		return EXIT_SUCCESS;
 	}
+
+	_ftprintf(stdout, _T("[*] Using current process id: pid %d.\n"), GetCurrentProcessId());
 	
 	// If the name was specified, then look for its pid.
 	if (strProcess)
@@ -821,10 +877,10 @@ int _tmain(int argc, TCHAR* argv[])
 		return AttachJobToPid(strName, dwPID)? EXIT_SUCCESS : EXIT_FAILURE;
 
 	if (strProcess)
-		_ftprintf(stderr, _T("[!] Could not find the process %s\n"), strProcess);
+		_ftprintf(stdout, _T("[!] Could not find the process %s!\n"), strProcess);
 	else {
 		return CreateProcessInJob(strName, cmdv) ? EXIT_SUCCESS : EXIT_FAILURE;
 	}
-	_ftprintf(stderr, _T("[!] You need to specify a PID or valid process name (use -g to list processes)\n"));
+	_ftprintf(stdout, _T("[!] You need to specify a PID or valid process name (use -g to list processes)!\n"));
 	return EXIT_FAILURE;
 }
