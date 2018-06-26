@@ -627,65 +627,68 @@ fail:
 // Function	: PrintHelp
 // Purpose	: Print the help out
 //
-void PrintHelp(TCHAR *strExe){
+void
+PrintHelp(TCHAR *strExe)
+{
+	_ftprintf(stdout, _T("    i.e. %s [-h] -- [command]\n"), strExe);
+	_ftprintf(stdout, _T("\n"));
+	_ftprintf(stdout, _T(" General Settings / Options:\n"));
+	_ftprintf(stdout, _T("    -g          - Get process list\n"));
+	_ftprintf(stdout, _T("    -f          - Force application of job to process ignoring any failures\n"));
+	_ftprintf(stdout, _T("    -c          - Create a new console when spawning the child process"));
+	_ftprintf(stdout, _T("    -P <name>   - Process name to apply the job to\n"));
+	_ftprintf(stdout, _T("    -p <PID>    - PID to apply the job to\n"));
+	_ftprintf(stdout, _T("    -n <name>   - What the job will be called (optional)\n"));
 
-        _ftprintf(stdout, _T("    i.e. %s [-h] -- [command]\n"), strExe);
-		_ftprintf(stdout, _T("\n"));
-		_ftprintf(stdout, _T(" General Settings / Options:\n"));
-		_ftprintf(stdout, _T("    -g          - Get process list\n"));
-		_ftprintf(stdout, _T("    -f          - Force application of job to process ignoring any failures\n"));
-        _ftprintf(stdout, _T("    -c          - Create a new console when spawning the child process"));
-		_ftprintf(stdout, _T("    -P <name>   - Process name to apply the job to\n"));
-		_ftprintf(stdout, _T("    -p <PID>    - PID to apply the job to\n"));
-        _ftprintf(stdout, _T("    -n <name>   - What the job will be called (optional)\n"));
-		_ftprintf(stdout, _T(" Process Limits:\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_ACTIVE_PROCESS
-        _ftprintf(stdout, _T("    -l <number> - Limit the number of process to this many\n"));
-		_ftprintf(stdout, _T(" Memory:\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_JOB_MEMORY
-        _ftprintf(stdout, _T("    -m <bytes>  - Limit the total memory in bytes for the entire job\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_MEMORY
-		_ftprintf(stdout, _T("    -M <bytes>  - Limit the total memory in bytes for each process in the job\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_JOB_TIME
-		_ftprintf(stdout, _T("    -t <ticks>   - Limit the execution time for the entire job\n"));
-		// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_TIME
-		_ftprintf(stdout, _T("    -T <ticks>   - Limit the execution time for each process in the job\n"));
-// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_WORKINGSET
-_ftprintf(stdout, _T("    -w <min-bytes> - Limit the minimum working set size\n"));
-_ftprintf(stdout, _T("    -W <max-bytes> - Limit the maximum working set size\n"));
-_ftprintf(stdout, _T(" Process Control (should be combined as a single parameter to -b):\n"));
-// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-_ftprintf(stdout, _T("    -b k        - Kill all process when the job handle dies\n"));
-// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_BREAKAWAY_OK
-_ftprintf(stdout, _T("    -b B        - Allow child process to be created with CREATE_BREAKAWAY_FROM_JOB (weak security)\n"));
-// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
-_ftprintf(stdout, _T("    -b b        - Allow child process which aren't part of the job (weak security)\n"));
-_ftprintf(stdout, _T(" UI Security Controls (should be combined as a single parameter to -u):\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DESKTOP
-_ftprintf(stdout, _T("    -u d        - Prevent processes within the job from switching or creating desktops\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
-_ftprintf(stdout, _T("    -u D        - Prevent processes within the job from calling the change display setting function\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_EXITWINDOWS
-_ftprintf(stdout, _T("    -u x        - Prevent processes within job from calling the exit Windows function\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_GLOBALATOMS
-_ftprintf(stdout, _T("    -u a        - Prevent processes within job from accessing global atoms\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_HANDLES
-_ftprintf(stdout, _T("    -u u        - Prevent processes within job from using user handles\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_READCLIPBOARD
-_ftprintf(stdout, _T("    -u c        - Prevent processes within job from reading the clipboard\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
-_ftprintf(stdout, _T("    -u s        - Prevent processes within job from changing system parameters\n"));
-// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_WRITECLIPBOARD
-_ftprintf(stdout, _T("    -u C        - Prevent processes within job from writing the clipboard\n"));
-// FIXME: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
-// FIXME: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
-// JOBOBJECT_EXTENDED_LIMIT_INFORMATION
-// JOBOBJECT_NOTIFICATION_LIMIT_INFORMATION
+	_ftprintf(stdout, _T(" Process Limits:\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_ACTIVE_PROCESS
+	_ftprintf(stdout, _T("    -l <number> - Limit the number of process to this many\n"));
 
-_ftprintf(stdout, _T("\n"));
-ExitProcess(1);
+	_ftprintf(stdout, _T(" Memory:\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_MEMORY
+	_ftprintf(stdout, _T("    -m <bytes>  - Limit the total memory in bytes for each process in the job\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_JOB_MEMORY
+	_ftprintf(stdout, _T("    -M <bytes>  - Limit the total memory in bytes for the entire job\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_PROCESS_TIME
+	_ftprintf(stdout, _T("    -t <ticks>   - Limit the execution time for each process in the job\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_JOB_TIME
+	_ftprintf(stdout, _T("    -T <ticks>   - Limit the execution time for the entire job\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_WORKINGSET
+	_ftprintf(stdout, _T("    -w <min-bytes> - Limit the minimum working set size\n"));
+	_ftprintf(stdout, _T("    -W <max-bytes> - Limit the maximum working set size\n"));
+
+	_ftprintf(stdout, _T(" Process Control (should be combined as a single parameter to -b):\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
+	_ftprintf(stdout, _T("    -b k        - Kill all process when the job handle dies\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_BREAKAWAY_OK
+	_ftprintf(stdout, _T("    -b b        - Allow child process to be created with CREATE_BREAKAWAY_FROM_JOB (weak security)\n"));
+	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
+	_ftprintf(stdout, _T("    -b B        - Allow child process which aren't part of the job (weak security)\n"));
+
+	_ftprintf(stdout, _T(" UI Security Controls (should be combined as a single parameter to -u):\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DESKTOP
+	_ftprintf(stdout, _T("    -u d        - Prevent processes within the job from switching or creating desktops\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_DISPLAYSETTINGS
+	_ftprintf(stdout, _T("    -u D        - Prevent processes within the job from calling the change display setting function\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_EXITWINDOWS
+	_ftprintf(stdout, _T("    -u x        - Prevent processes within job from calling the exit Windows function\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_GLOBALATOMS
+	_ftprintf(stdout, _T("    -u a        - Prevent processes within job from accessing global atoms\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_HANDLES
+	_ftprintf(stdout, _T("    -u u        - Prevent processes within job from using user handles\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_READCLIPBOARD
+	_ftprintf(stdout, _T("    -u c        - Prevent processes within job from reading the clipboard\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_SYSTEMPARAMETERS
+	_ftprintf(stdout, _T("    -u s        - Prevent processes within job from changing system parameters\n"));
+	// JOBOBJECT_BASIC_UI_RESTRICTIONS - JOB_OBJECT_UILIMIT_WRITECLIPBOARD
+	_ftprintf(stdout, _T("    -u C        - Prevent processes within job from writing the clipboard\n"));
+
+	// FIXME: JOBOBJECT_CPU_RATE_CONTROL_INFORMATION
+
+	// FIXME: JOBOBJECT_NOTIFICATION_LIMIT_INFORMATION
+
+	_ftprintf(stdout, _T("\n"));
 }
-
 
 //
 // Function	: _tmain
@@ -729,19 +732,19 @@ int _tmain(int argc, TCHAR* argv[])
 			Basic.dwProcessLimitQ = TRUE;
 			Basic.dwProcessLimit = _tstoi(optarg); argpos++;
 			break;
-		case _T('m'):
+		case _T('M'):
 			Extended.dwJobMemoryQ = TRUE;
 			Extended.dwJobMemory = _tstoi(optarg); argpos++;
 			break;
-		case _T('M'):
+		case _T('m'):
 			Extended.dwProcessMemoryQ = TRUE;
 			Extended.dwProcessMemory = _tstoi(optarg); argpos++;
 			break;
-		case _T('t'):
+		case _T('T'):
 			Basic.dwJobTicksLimitQ = TRUE;
 			Basic.dwJobTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
 			break;
-		case _T('T'):
+		case _T('t'):
 			Basic.dwProcessTicksLimitQ = TRUE;
 			Basic.dwProcessTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
 			break;
@@ -759,9 +762,9 @@ int _tmain(int argc, TCHAR* argv[])
 		case  _T('b'):
 			if (_tcsstr(optarg, _T("k")))
 				Basic.bKillProcOnJobClose = TRUE;
-			if (_tcsstr(optarg, _T("B")))
-				Basic.bBreakAwayOK = TRUE;
 			if (_tcsstr(optarg, _T("b")))
+				Basic.bBreakAwayOK = TRUE;
+			if (_tcsstr(optarg, _T("B")))
 				Basic.bSilentBreakAwayOK = TRUE;
 			argpos++;
 			break;
@@ -786,7 +789,7 @@ int _tmain(int argc, TCHAR* argv[])
 			break;
 		case _T('h'):
 			PrintHelp(argv[0]);
-			return 0;
+			return EXIT_SUCCESS;
 		default:
 			_ftprintf(stderr, _T("[!] No handler - %s\n"), argv[argpos]);
 			break;
@@ -806,7 +809,7 @@ int _tmain(int argc, TCHAR* argv[])
 	// List processe if requested by user
 	if (bListProcesses) {
 		ListProcesses();
-		return 0;
+		return EXIT_SUCCESS;
 	}
 	
 	// If the name was specified, then look for its pid.
@@ -814,13 +817,13 @@ int _tmain(int argc, TCHAR* argv[])
 		dwPID = FindProcess(strProcess);
 
 	if (dwPID)
-		return AttachJobToPid(strName, dwPID)? 0 : -1;
+		return AttachJobToPid(strName, dwPID)? EXIT_SUCCESS : EXIT_FAILURE;
 
 	if (strProcess)
 		_ftprintf(stderr, _T("[!] Could not find the process %s\n"), strProcess);
 	else {
-		return CreateProcessInJob(strName, cmdv) ? 0 : -1;
+		return CreateProcessInJob(strName, cmdv) ? EXIT_SUCCESS : EXIT_FAILURE;
 	}
 	_ftprintf(stderr, _T("[!] You need to specify a PID or valid process name (use -g to list processes)\n"));
-	return -1;
+	return EXIT_FAILURE;
 }
