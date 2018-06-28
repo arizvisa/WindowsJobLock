@@ -24,15 +24,24 @@ static const size_t WorkingSetSize_Minimum = PageSize * 20;
 static const size_t WorkingSetSize_Maximum = ~1;
 
 // Miscellaneous definitions
-enum PrintSettings_enum {
+enum OutputSettings_enum : int {
 	AttachToJob,
 	CreateInJob,
 };
 
+enum JobNotification_enum : int {
+	JobNotifyContinue,
+	JobNotifyTerminate,
+	JobNotifyLeave,
+};
+
 // Global
+static const ULONG_PTR JobNotificationKey = (ULONG_PTR)0x0d0e0a0d;
+
 BOOL bListProcesses = FALSE;
 BOOL bCreateConsole = FALSE;
 BOOL bWaitForProcess = TRUE;
+BOOL bKillProcess = FALSE;
 BOOL bIgnoreJobFailures = FALSE;
 struct {
 	BOOL dwProcessLimitQ;
@@ -79,7 +88,7 @@ DWORD FindProcess(TCHAR *strName)
 
 	if (!WTSEnumerateProcesses(WTS_CURRENT_SERVER_HANDLE, 0, 1, &ppProcessInfo, &dwRet))
 		return 0;
-	
+
 	for (dwCount = 0; dwCount < dwRet; dwCount++) {
 		if (lstrcmp(ppProcessInfo[dwCount].pProcessName, strName) == 0) {
 			 return ppProcessInfo[dwCount].ProcessId;
@@ -386,10 +395,159 @@ fail:
 	return NULL;
 }
 
-BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
+HANDLE
+AssociateJobCompletionPort(HANDLE hJob, PVOID key)
+{
+	HANDLE hPort = NULL;
+	JOBOBJECT_ASSOCIATE_COMPLETION_PORT jacp;
+
+	// Create an I/O Completion Port
+	hPort = CreateIoCompletionPort(INVALID_HANDLE_VALUE, NULL, (ULONG_PTR)key, 0);
+	if (hPort == NULL)
+		return NULL;
+
+	// Populate our structure
+	jacp.CompletionKey = key;
+	jacp.CompletionPort = hPort;
+
+	// Assign it to the job
+	if (!SetInformationJobObject(hJob, JobObjectAssociateCompletionPortInformation, &jacp, sizeof(jacp)))
+		goto fail;
+
+	return hPort;
+
+fail:
+	if (hPort)
+		CloseHandle(hPort);
+	return NULL;
+}
+
+enum JobNotification_enum
+HandleCompletionPort(HANDLE hPort, ULONG_PTR key)
 {
 	DWORD err;
-	HANDLE hJob;
+	DWORD dwMessageId;
+	LPOVERLAPPED messageData;
+	ULONG_PTR resultKey;
+
+	// grab a message from our port
+	if (!GetQueuedCompletionStatus(hPort, &dwMessageId, &resultKey, &messageData, 0)) {
+		err = GetLastError();
+		if ((err == WAIT_TIMEOUT) || (err == ERROR_ABANDONED_WAIT_0))
+			return JobNotifyContinue;
+		_ftprintf(stdout, _T("[!] Received an unexpected error from completion port: error %d\n"), err);
+		return JobNotifyContinue;
+	}
+
+	// validate the key is correct
+	if (resultKey != key) {
+		_ftprintf(stdout, _T("[!] Received a key (%#x) on the completion port that did not match the expected one (%#x)!\n"), resultKey, key);
+		return JobNotifyContinue;
+	}
+
+	switch (dwMessageId) {
+	case JOB_OBJECT_MSG_NEW_PROCESS:
+		_ftprintf(stdout, _T("[I] New process (%d) was added to the job.\n"), (unsigned)messageData);
+		return JobNotifyContinue;
+	case JOB_OBJECT_MSG_EXIT_PROCESS:
+		_ftprintf(stdout, _T("[I] A process (%d) has terminated and was removed from the job.\n"), (unsigned)messageData);
+		return JobNotifyContinue;
+	case JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS:
+		_ftprintf(stdout, _T("[I] A process (%d) has abnormally terminated and was removed from the job.\n"), (unsigned)messageData);
+		return JobNotifyContinue;
+
+	case JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT:
+		_ftprintf(stdout, _T("[I] The job has reached its process limit while another process was added to the job.\n"));
+		return bKillProcess? JobNotifyTerminate : JobNotifyContinue;
+	case JOB_OBJECT_MSG_ACTIVE_PROCESS_ZERO:
+		_ftprintf(stdout, _T("[I] All processes within the job have terminated.\n"));
+		break;
+
+	case JOB_OBJECT_MSG_END_OF_JOB_TIME:
+		_ftprintf(stdout, _T("[I] The job has reached its time limit.\n"));
+		break;
+	case JOB_OBJECT_MSG_END_OF_PROCESS_TIME:
+		_ftprintf(stdout, _T("[I] A process (%d) within the job has reached its time limit.\n"), (unsigned)messageData);
+		break;
+
+	case JOB_OBJECT_MSG_JOB_MEMORY_LIMIT:
+		_ftprintf(stdout, _T("[I] The job has reached its memory limit as a result of process (%d).\n"), (unsigned)messageData);
+		return bKillProcess? JobNotifyTerminate : JobNotifyContinue;
+	case JOB_OBJECT_MSG_PROCESS_MEMORY_LIMIT:
+		_ftprintf(stdout, _T("[I] A process (%d) within the job has reached its memory limit.\n"), (unsigned)messageData);
+		return bKillProcess? JobNotifyTerminate : JobNotifyContinue;
+
+	case JOB_OBJECT_MSG_NOTIFICATION_LIMIT:
+		_ftprintf(stdout, _T("[I] The job has signalled that a resource limit was reached by process (%d).\n"), (unsigned)messageData);
+		break;
+	}
+
+	return JobNotifyLeave;
+}
+
+BOOL
+WaitForProcess(HANDLE hProcess, HANDLE hPort)
+{
+	DWORD err;
+	struct { ULONGLONG start, stop; } ts;
+	HANDLE hHandles[2];
+
+	QueryUnbiasedInterruptTime(&ts.start);
+	hHandles[0] = hProcess;
+	hHandles[1] = hPort;
+
+try_again:
+	err = WaitForMultipleObjects(2, hHandles, FALSE, INFINITE);
+	if (err == WAIT_FAILED) {
+		switch (err = GetLastError()) {
+		case ERROR_ACCESS_DENIED:
+			_ftprintf(stdout, _T("[!] Unable to wait for process %d to complete due to invalid access.\n"), GetProcessId(hProcess));
+			break;
+		default:
+			_ftprintf(stdout, _T("[!] Unable to wait for process %d to complete: error %d\n"), GetProcessId(hProcess), GetLastError());
+		}
+		return FALSE;
+	} else if (!(err == WAIT_OBJECT_0 + 0 || err == WAIT_OBJECT_0 + 1)) {
+		_ftprintf(stdout, _T("[!] Process %d has returned an unexpected signal %#x: error %d\n"), GetProcessId(hProcess), err, GetLastError());
+		return FALSE;
+	}
+
+	// so something here has signalled, let's figure it out
+	QueryUnbiasedInterruptTime(&ts.stop);
+
+	if (err == WAIT_OBJECT_0 + 0)
+		// in this case, it was the process which means it's terminated
+		_ftprintf(stdout, _T("[*] Process %d has terminated (%lf sec).\n"), GetProcessId(hProcess), (long double)(ts.stop - ts.start) / (long double)1e7);
+
+	else if (err == WAIT_OBJECT_0 + 1) {
+		// if this happens, then it was the I/O port, so figure out which message was sent
+		switch (HandleCompletionPort(hPort, JobNotificationKey)) {
+		case JobNotifyContinue:
+			// message told us to continue, so try waiting again
+			goto try_again;
+
+		case JobNotifyTerminate:
+			// terminate the process since we were notified
+			if (!TerminateProcess(hProcess, 0))
+				_ftprintf(stdout, _T("[!] Unable to terminate process %d: error %d\n"), GetProcessId(hProcess), GetLastError());
+			else
+				_ftprintf(stdout, _T("[*] Process %d has been terminated (%lf sec).\n"), GetProcessId(hProcess), (long double)(ts.stop - ts.start) / (long double)1e7);
+			break;
+
+		case JobNotifyLeave:
+			// apparently everything terminated already, so just notify the user
+			_ftprintf(stdout, _T("[*] Process %d has completed (%lf sec).\n"), GetProcessId(hProcess), (long double)(ts.stop - ts.start) / (long double)1e7);
+			break;
+		}
+	}
+	return TRUE;
+}
+
+HANDLE
+BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
+{
+	DWORD err;
+	HANDLE hJob = NULL;
 
 	TCHAR strFinalName[MAX_PATH] = { 0 };
 
@@ -403,7 +561,7 @@ BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 	_ftprintf(stdout, _T("[*] Requesting necessary privileges for process %d.\n"), GetCurrentProcessId());
 	if (!RequestNecessaryPrivileges(GetCurrentProcess())) {
 		_ftprintf(stdout, _T("[!] Unable to request privileges for process %d in order to specify quotas: error %d\n"), GetCurrentProcessId(), GetLastError());
-		return FALSE;
+		goto fail;
 	}
 
 	// Initialize a Job object using the arguments the user specified
@@ -418,38 +576,31 @@ BOOL BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 		} else {
 			_ftprintf(stdout, _T("[!] Couldn't create job %s: error %d\n"), JOBNAME(jobName), err);
 		}
-		return FALSE;
+		goto fail;
 	}
 
 	// Duplicate the handle into the target process
 	_ftprintf(stdout, _T("[*] Duplicating job handle %s (%#x) into target process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess));
 	if(!DuplicateHandle(GetCurrentProcess(),hJob,hProcess,NULL,JOB_OBJECT_QUERY,TRUE,NULL)){
 		_ftprintf(stdout, _T("[!] Couldn't duplicate job handle %s (%#x) into target process %s (%d): error %d\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess), GetLastError());
-		return FALSE;
+		goto fail;
 	}
 	_ftprintf(stdout, _T("[I] Duplicated job handle %s (%#x) with restricted access into target process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess));
 
-	// Now assign the process to the job object
-	_ftprintf(stdout, _T("[*] Adding process %s (%d) into job %s (%#x)..\n"), strProcess, GetProcessId(hProcess), JOBNAME(jobName), (unsigned)hJob);
-	if(!AssignProcessToJobObject(hJob,hProcess)){
-		err = GetLastError();
-		if (err == ERROR_ACCESS_DENIED) { // Windows 7 and Server 2008 R2 and below
-			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#x) to process %s (%d) as it looks like a job object has already been applied!\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess));
-			return FALSE;
-		} else
-			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#x) to process %s (%d): error %d\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess), err);
-		return FALSE;
-	}
-	_ftprintf(stdout, _T("[*] Applied job %s (%#x) to process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess));
+	return hJob;
 
-	return TRUE;
+fail:
+	if (hJob)
+		CloseHandle(hJob);
+
+	return NULL;
 }
 
 //
 // Function	: PrintSettings
 // Purpose	: Print the settings we will apply
 //
-void PrintSettings(enum PrintSettings_enum fmt)
+void PrintSettings(enum OutputSettings_enum fmt)
 {
 	DWORD processLimit = Basic.dwProcessLimit;
 
@@ -487,6 +638,10 @@ void PrintSettings(enum PrintSettings_enum fmt)
 BOOL
 AttachJobToPid(TCHAR* jobName, DWORD pid)
 {
+	DWORD err;
+	HANDLE hJob = NULL;
+	HANDLE hPort = NULL;
+
 	HANDLE hProcess = NULL;
 	TCHAR strProcName[MAX_PATH];
 
@@ -494,8 +649,9 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 		_ftprintf(stdout,  _T("[!] Could not find the name of the process: pid %d\n"), pid);
 		return FALSE;
 	}
+	_ftprintf(stdout, _T("[I] Found name %s for process id %d.\n"), strProcName, pid);
 
-	hProcess = OpenProcess(PROCESS_SET_QUOTA|PROCESS_TERMINATE|PROCESS_DUP_HANDLE, false, pid);
+	hProcess = OpenProcess(PROCESS_SET_QUOTA|PROCESS_TERMINATE|PROCESS_DUP_HANDLE|PROCESS_QUERY_INFORMATION|SYNCHRONIZE, false, pid);
 	if(hProcess == NULL || hProcess == INVALID_HANDLE_VALUE){
 		_ftprintf(stdout,  _T("[!] Could not open process %s (%d): error %d\n"), strProcName, pid, GetLastError());
 		return FALSE;
@@ -504,13 +660,57 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 
 	PrintSettings(AttachToJob);
 
-	if (!BuildAndDeploy(jobName, strProcName, hProcess)) {
+	hJob = BuildAndDeploy(jobName, strProcName, hProcess);
+	if (hJob == NULL) {
 		_ftprintf(stdout, _T("[!] Failed to build and deploy job object to %s (%d)!\n"), strProcName, pid);
 		return FALSE;
 	}
 
+	_ftprintf(stdout, _T("[*] Associating an I/O Completion Port to job %s (%#x)..\n"), JOBNAME(jobName), (unsigned)hJob);
+	hPort = AssociateJobCompletionPort(hJob, (PVOID)JobNotificationKey);
+	if (!hPort) {
+		_ftprintf(stdout, _T("[!] Couldn't associate an I/O Completion Port to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned)hJob, GetLastError());
+		goto fail;
+	}
+
+	// Now assign the process to the job object
+	_ftprintf(stdout, _T("[*] Adding process %s (%d) into job %s (%#x)..\n"), strProcName, GetProcessId(hProcess), JOBNAME(jobName), (unsigned)hJob);
+	if(!AssignProcessToJobObject(hJob,hProcess)){
+		err = GetLastError();
+		if (err == ERROR_ACCESS_DENIED)	// Windows 7 and Server 2008 R2 and below
+			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#x) to process %s (%d) as it looks like a job object has already been applied!\n"), JOBNAME(jobName), (unsigned)hJob, strProcName, GetProcessId(hProcess));
+		else
+			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#x) to process %s (%d): error %d\n"), JOBNAME(jobName), (unsigned)hJob, strProcName, GetProcessId(hProcess), err);
+		goto fail;
+	}
+	_ftprintf(stdout, _T("[*] Applied job %s (%#x) to process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcName, GetProcessId(hProcess));
+
+
 	_ftprintf(stdout, _T("[*] Successfully built and deployed job object to %s (%d).\n"), strProcName, pid);
+
+	// check if we should wait for the child process to terminate
+	if (!bWaitForProcess)
+		goto leave;
+
+	// wait until the process or port has signalled
+	_ftprintf(stdout, _T("[*] Waiting for events from job %s (%#x).\n"), JOBNAME(jobName), (unsigned)hJob);
+	if (!WaitForProcess(hProcess, hPort))
+		_ftprintf(stdout, _T("[!] Unexpected error while trying to wait for events!\n"));
+
+leave:
+	CloseHandle(hProcess);
+	CloseHandle(hJob);
+	CloseHandle(hPort);
 	return TRUE;
+
+fail:
+	if (hProcess)
+		CloseHandle(hProcess);
+	if (hJob)
+		CloseHandle(hJob);
+	if (hPort)
+		CloseHandle(hPort);
+	return FALSE;
 }
 
 TCHAR*
@@ -583,7 +783,7 @@ StartProcess(TCHAR* appname, TCHAR* cmdline)
 
 	// FIXME: use STARTUPINFOEX to inherit just the job handle instead of inheriting all handles
 
-	if (!CreateProcess(appname, cmdline, NULL, NULL, TRUE, (bCreateConsole? CREATE_NEW_CONSOLE : CREATE_NEW_PROCESS_GROUP), NULL, NULL, (LPSTARTUPINFOW)&si, &pi))
+	if (!CreateProcess(appname, cmdline, NULL, NULL, TRUE, bCreateConsole? CREATE_NEW_CONSOLE : CREATE_NEW_PROCESS_GROUP, NULL, NULL, (LPSTARTUPINFOW)&si, &pi))
 		return NULL;
 
 	CloseHandle(pi.hThread);
@@ -595,9 +795,9 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 {
 	DWORD err;
 
-	HANDLE hJob;
+	HANDLE hJob = NULL;
+	HANDLE hPort = NULL;
 	TCHAR strFinalName[MAX_PATH] = { 0 };
-	struct { ULONGLONG start, stop; } ts;
 
 	HANDLE hProcess = NULL;
 	TCHAR cmdline[UNICODE_STRING_MAX_CHARS] = { 0 };
@@ -635,6 +835,14 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 		} else {
 			_ftprintf(stdout, _T("[!] Couldn't create job %s: error %d\n"), JOBNAME(jobName), err);
 		}
+		goto fail;
+	}
+
+	// Assign an I/O Completion Port to it
+	_ftprintf(stdout, _T("[*] Associating an I/O Completion Port to job %s (%#x)..\n"), JOBNAME(jobName), (unsigned)hJob);
+	hPort = AssociateJobCompletionPort(hJob, (PVOID)JobNotificationKey);
+	if (!hPort) {
+		_ftprintf(stdout, _T("[!] Couldn't associate an I/O Completion Port to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned)hJob, GetLastError());
 		goto fail;
 	}
 
@@ -681,33 +889,26 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 		}
 	}
 	_ftprintf(stdout, _T("[*] Process %s (%d) is ready.\n"), argv[0], GetProcessId(hProcess));
-	QueryUnbiasedInterruptTime(&ts.start);
 
 	// check if we should wait for the child process to terminate
-	if (!bWaitForProcess) {
-		CloseHandle(hProcess);
-		return TRUE;
-	}
+	if (!bWaitForProcess)
+		goto leave;
 
-	// wait until the process has terminated
-	err = WaitForSingleObject(hProcess, INFINITE);
-	if (err == WAIT_FAILED) {
-		_ftprintf(stdout, _T("[!] Unable to wait for process %s (%d) to complete: error %d\n"), argv[0], GetProcessId(hProcess), GetLastError());
-		goto fail;
-	}
-	else if (err != WAIT_OBJECT_0) {
-		_ftprintf(stdout, _T("[!] Process %s (%d) has returned an unexpected signal %#x: error %d\n"), argv[0], GetProcessId(hProcess), err, GetLastError());
-		goto fail;
-	}
+	// wait until the process or port has signalled
+	_ftprintf(stdout, _T("[*] Waiting for events from job %s (%#x).\n"), JOBNAME(jobName), (unsigned)hJob);
+	if (!WaitForProcess(hProcess, hPort))
+		_ftprintf(stdout, _T("[!] Unexpected error while trying to wait for events!\n"));
 
-	QueryUnbiasedInterruptTime(&ts.stop);
-	_ftprintf(stdout, _T("[*] Process %s (%d) has terminated (%lf sec).\n"), argv[0], GetProcessId(hProcess), (long double)(ts.stop - ts.start) / (long double)1e7);
-	
 	// we should be done and good to go
+leave:
+	CloseHandle(hJob);;
+	CloseHandle(hPort);
 	CloseHandle(hProcess);
 	return TRUE;
 
 fail:
+	if (hPort)
+		CloseHandle(hPort);
 	if (hJob)
 		CloseHandle(hJob);
 	if (hProcess)
@@ -727,7 +928,9 @@ PrintHelp(TCHAR *strExe)
 	_ftprintf(stdout, _T(" General Settings / Options:\n"));
 	_ftprintf(stdout, _T("    -g          - Get process list\n"));
 	_ftprintf(stdout, _T("    -f          - Force application of job to process ignoring any failures\n"));
-	_ftprintf(stdout, _T("    -c          - Create a new console when spawning the child process"));
+	_ftprintf(stdout, _T("    -c          - Create a new console when spawning the child process\n"));
+	_ftprintf(stdout, _T("    -d          - Detach from process without waiting for events\n"));
+	_ftprintf(stdout, _T("    -k          - Kill process on limit violation\n"));
 	_ftprintf(stdout, _T("    -P <name>   - Process name to apply the job to\n"));
 	_ftprintf(stdout, _T("    -p <PID>    - PID to apply the job to\n"));
 	_ftprintf(stdout, _T("    -n <name>   - What the job will be called (optional)\n"));
@@ -751,7 +954,7 @@ PrintHelp(TCHAR *strExe)
 
 	_ftprintf(stdout, _T(" Process Control (should be combined as a single parameter to -b):\n"));
 	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE
-	_ftprintf(stdout, _T("    -b k        - Kill all process when the job handle dies\n"));
+	_ftprintf(stdout, _T("    -b k        - Kill all processes when the job handle dies\n"));
 	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_BREAKAWAY_OK
 	_ftprintf(stdout, _T("    -b b        - Allow child process to be created with CREATE_BREAKAWAY_FROM_JOB (weak security)\n"));
 	// JOBOBJECT_BASIC_LIMIT_INFORMATION.LimitFlags - JOB_OBJECT_LIMIT_SILENT_BREAKAWAY_OK
@@ -803,11 +1006,19 @@ int _tmain(int argc, TCHAR* argv[])
 
 	// Extract all the options
 	argpos = 1;
-	while ((chOpt = getopt(argc, argv, _T("gh fc P:p:l:m:M:n:t:T:w:W:u:b:"))) != EOF) {
+	while ((chOpt = getopt(argc, argv, _T("gh dkfc P:p:l:m:M:n:t:T:w:W:u:b:"))) != EOF) {
 		switch (chOpt) {
+		case _T('h'):
+			PrintHelp(argv[0]);
+			return EXIT_SUCCESS;
 		case _T('g'):
 			bListProcesses = TRUE;
 			break;
+		case _T('d'):
+			bWaitForProcess = FALSE;
+			break;
+		case _T('k'):
+			bKillProcess = TRUE;
 		case _T('c'):
 			bCreateConsole = TRUE;
 			break;
@@ -879,9 +1090,6 @@ int _tmain(int argc, TCHAR* argv[])
 				UI.bUILimitWriteClip = TRUE;
 			argpos++;
 			break;
-		case _T('h'):
-			PrintHelp(argv[0]);
-			return EXIT_SUCCESS;
 		default:
 			_ftprintf(stdout, _T("[!] No handler - %s\n"), argv[argpos]);
 			break;
@@ -905,7 +1113,7 @@ int _tmain(int argc, TCHAR* argv[])
 	}
 
 	_ftprintf(stdout, _T("[*] Using current process id: %d.\n"), GetCurrentProcessId());
-	
+
 	// If the name was specified, then look for its pid.
 	if (strProcess)
 		dwPID = FindProcess(strProcess);
