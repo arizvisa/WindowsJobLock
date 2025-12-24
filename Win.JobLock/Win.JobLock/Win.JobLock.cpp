@@ -152,7 +152,7 @@ SetPrivilege(HANDLE hToken, LPCTSTR lpszPrivilege, BOOL bEnablePrivilege)
         tp.Privileges[0].Attributes = 0;
 
     // Enable the privilege or disable all privileges.
-    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, sizeof(TOKEN_PRIVILEGES), (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL))
+    if (!AdjustTokenPrivileges(hToken, FALSE, &tp, 0, (PTOKEN_PRIVILEGES)NULL, (PDWORD)NULL))
           return FALSE;
 
     return (GetLastError() == ERROR_NOT_ALL_ASSIGNED)? FALSE : TRUE;
@@ -189,7 +189,7 @@ InitializeJobObject_BasicLimitInformation(struct _JOBOBJECT_BASIC_LIMIT_INFORMAT
 	}
 
 	if (Basic.dwJobTicksLimitQ) {
-		jbli->LimitFlags |= JOB_OBJECT_LIMIT_PROCESS_TIME;
+		jbli->LimitFlags |= JOB_OBJECT_LIMIT_JOB_TIME;
 		jbli->PerJobUserTimeLimit = Basic.dwProcessTicksLimit;
 		result = TRUE;
 	}
@@ -581,7 +581,7 @@ BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 
 	// Duplicate the handle into the target process
 	_ftprintf(stdout, _T("[*] Duplicating job handle %s (%#x) into target process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess));
-	if(!DuplicateHandle(GetCurrentProcess(),hJob,hProcess,NULL,JOB_OBJECT_QUERY,TRUE,NULL)){
+	if(!DuplicateHandle(GetCurrentProcess(), hJob, hProcess, NULL, JOB_OBJECT_QUERY, TRUE, DUPLICATE_SAME_ACCESS)){
 		_ftprintf(stdout, _T("[!] Couldn't duplicate job handle %s (%#x) into target process %s (%d): error %d\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess), GetLastError());
 		goto fail;
 	}
@@ -651,7 +651,7 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 	}
 	_ftprintf(stdout, _T("[I] Found name %s for process id %d.\n"), strProcName, pid);
 
-	hProcess = OpenProcess(PROCESS_SET_QUOTA|PROCESS_TERMINATE|PROCESS_DUP_HANDLE|PROCESS_QUERY_INFORMATION|SYNCHRONIZE, false, pid);
+	hProcess = OpenProcess(PROCESS_DUP_HANDLE|PROCESS_QUERY_INFORMATION|PROCESS_SET_QUOTA|PROCESS_TERMINATE|SYNCHRONIZE, false, pid);
 	if(hProcess == NULL || hProcess == INVALID_HANDLE_VALUE){
 		_ftprintf(stdout,  _T("[!] Could not open process %s (%d): error %d\n"), strProcName, pid, GetLastError());
 		return FALSE;
@@ -869,7 +869,7 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 	hProcess = StartProcess(argv[0], cmdline);
 	if (hProcess == NULL) {
 		err = GetLastError();
-		if (err = ERROR_FILE_NOT_FOUND) {
+		if (err == ERROR_FILE_NOT_FOUND) {
 			_ftprintf(stdout, _T("[!] Unable to start process %s due to the file not being found!\n"), argv[0]);
 		} else
 			_ftprintf(stdout, _T("[!] Unable to start process %s: error %d\n"), argv[0], err);
