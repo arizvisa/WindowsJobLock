@@ -205,7 +205,7 @@ InitializeJobObject_BasicLimitInformation(struct _JOBOBJECT_BASIC_LIMIT_INFORMAT
 		jbli->LimitFlags |= JOB_OBJECT_LIMIT_WORKINGSET;
 
 		if (Basic.dwMinimumWorkingSetSize < WorkingSetSize_Minimum) {
-			_ftprintf(stdout, _T("[!] Requested Minimum Working Set Size (%d pages) is less than the minimum (%d pages). Using %d bytes instead.\n"), Basic.dwMinimumWorkingSetSize / PageSize, WorkingSetSize_Minimum / PageSize, WorkingSetSize_Minimum);
+			_ftprintf(stdout, _T("[!] Requested Minimum Working Set Size (%Id pages) is less than the minimum (%Id pages). Using %Id bytes instead.\n"), Basic.dwMinimumWorkingSetSize / PageSize, WorkingSetSize_Minimum / PageSize, WorkingSetSize_Minimum);
 			jbli->MinimumWorkingSetSize = WorkingSetSize_Minimum;
 		} else
 			jbli->MinimumWorkingSetSize = Basic.dwMinimumWorkingSetSize;
@@ -221,7 +221,7 @@ InitializeJobObject_BasicLimitInformation(struct _JOBOBJECT_BASIC_LIMIT_INFORMAT
 		if (Basic.dwMaximumWorkingSetSize < WorkingSetSize_Maximum)
 			jbli->MaximumWorkingSetSize = Basic.dwMaximumWorkingSetSize;
 		else {
-			_ftprintf(stdout, _T("[!] Requested Maximum Working Set Size (%d pages) is larger than the maximum (%d pages). Using %d bytes instead.\n"), Basic.dwMaximumWorkingSetSize / PageSize, WorkingSetSize_Maximum / PageSize, WorkingSetSize_Maximum);
+			_ftprintf(stdout, _T("[!] Requested Maximum Working Set Size (%Id pages) is larger than the maximum (%Id pages). Using %Id bytes instead.\n"), Basic.dwMaximumWorkingSetSize / PageSize, WorkingSetSize_Maximum / PageSize, WorkingSetSize_Maximum);
 			jbli->MaximumWorkingSetSize = WorkingSetSize_Maximum;
 
 		}
@@ -352,25 +352,25 @@ InitializeJobObject(TCHAR* jobName)
 
 	// Now we can set these structures to the job object
 	if (jobRequired.basic && !SetInformationJobObject(hJob, JobObjectBasicLimitInformation, &jblInfo, sizeof(jblInfo))) {
-		_ftprintf(stdout, _T("[!] Couldn't set job basic limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned)hJob, GetLastError());
+		_ftprintf(stdout, _T("[!] Couldn't set job basic limits to job %s (%#p): error %d\n"), JOBNAME(jobName), hJob, GetLastError());
 		jobSuccess.basic = FALSE;
 	}
 	else if (jobRequired.basic)
-		_ftprintf(stdout, _T("[*] Applied job basic limits to job %s (%#x).\n"), JOBNAME(jobName), (unsigned)hJob);
+		_ftprintf(stdout, _T("[*] Applied job basic limits to job %s (%#p).\n"), JOBNAME(jobName), hJob);
 
 	if (jobRequired.extended && !SetInformationJobObject(hJob, JobObjectExtendedLimitInformation, &jelInfo, sizeof(jelInfo))) {
-		_ftprintf(stdout, _T("[!] Couldn't set job extended limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned)hJob, GetLastError());
+		_ftprintf(stdout, _T("[!] Couldn't set job extended limits to job %s (%#p): error %d\n"), JOBNAME(jobName), hJob, GetLastError());
 		jobSuccess.extended = FALSE;
 	}
 	else if (jobRequired.extended)
-		_ftprintf(stdout, _T("[*] Applied job extended limits to job %s (%#x).\n"), JOBNAME(jobName), (unsigned)hJob);
+		_ftprintf(stdout, _T("[*] Applied job extended limits to job %s (%#p).\n"), JOBNAME(jobName), hJob);
 
 	if (jobRequired.ui && !SetInformationJobObject(hJob, JobObjectBasicUIRestrictions, &jbuiRestrictions, sizeof(jbuiRestrictions))) {
-		_ftprintf(stdout, _T("[!] Couldn't set job UI limits to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned)hJob, GetLastError());
+		_ftprintf(stdout, _T("[!] Couldn't set job UI limits to job %s (%#p): error %d\n"), JOBNAME(jobName), hJob, GetLastError());
 		jobSuccess.ui = FALSE;
 	}
 	else if (jobRequired.ui)
-		_ftprintf(stdout, _T("[*] Applied job UI limits to job %s (%#x).\n"), JOBNAME(jobName), (unsigned)hJob);
+		_ftprintf(stdout, _T("[*] Applied job UI limits to job %s (%#p).\n"), JOBNAME(jobName), hJob);
 
 	// Check if everything failed, and fail if so.
 	if (!bIgnoreJobFailures && (!jobSuccess.basic && jobRequired.basic)) {
@@ -441,19 +441,19 @@ HandleCompletionPort(HANDLE hPort, ULONG_PTR key)
 
 	// validate the key is correct
 	if (resultKey != key) {
-		_ftprintf(stdout, _T("[!] Received a key (%#x) on the completion port that did not match the expected one (%#x)!\n"), resultKey, key);
+		_ftprintf(stdout, _T("[!] Received a key (%#p) on the completion port that did not match the expected one (%#p)!\n"), (void*)resultKey, (void*)key);
 		return JobNotifyContinue;
 	}
 
 	switch (dwMessageId) {
 	case JOB_OBJECT_MSG_NEW_PROCESS:
-		_ftprintf(stdout, _T("[I] New process (%d) was added to the job.\n"), (unsigned)messageData);
+		_ftprintf(stdout, _T("[I] New process (%d) was added to the job.\n"), *(DWORD*)(&messageData));
 		return JobNotifyContinue;
 	case JOB_OBJECT_MSG_EXIT_PROCESS:
-		_ftprintf(stdout, _T("[I] A process (%d) has terminated and was removed from the job.\n"), (unsigned)messageData);
+		_ftprintf(stdout, _T("[I] A process (%d) has terminated and was removed from the job.\n"), *(DWORD*)(&messageData));
 		return JobNotifyContinue;
 	case JOB_OBJECT_MSG_ABNORMAL_EXIT_PROCESS:
-		_ftprintf(stdout, _T("[I] A process (%d) has abnormally terminated and was removed from the job.\n"), (unsigned)messageData);
+		_ftprintf(stdout, _T("[I] A process (%d) has abnormally terminated and was removed from the job.\n"), *(DWORD*)(&messageData));
 		return JobNotifyContinue;
 
 	case JOB_OBJECT_MSG_ACTIVE_PROCESS_LIMIT:
@@ -467,18 +467,18 @@ HandleCompletionPort(HANDLE hPort, ULONG_PTR key)
 		_ftprintf(stdout, _T("[I] The job has reached its time limit.\n"));
 		break;
 	case JOB_OBJECT_MSG_END_OF_PROCESS_TIME:
-		_ftprintf(stdout, _T("[I] A process (%d) within the job has reached its time limit.\n"), (unsigned)messageData);
+		_ftprintf(stdout, _T("[I] A process (%d) within the job has reached its time limit.\n"), *(DWORD*)(&messageData));
 		break;
 
 	case JOB_OBJECT_MSG_JOB_MEMORY_LIMIT:
-		_ftprintf(stdout, _T("[I] The job has reached its memory limit as a result of process (%d).\n"), (unsigned)messageData);
+		_ftprintf(stdout, _T("[I] The job has reached its memory limit as a result of process (%d).\n"), *(DWORD*)(&messageData));
 		return bKillProcess? JobNotifyTerminate : JobNotifyContinue;
 	case JOB_OBJECT_MSG_PROCESS_MEMORY_LIMIT:
-		_ftprintf(stdout, _T("[I] A process (%d) within the job has reached its memory limit.\n"), (unsigned)messageData);
+		_ftprintf(stdout, _T("[I] A process (%d) within the job has reached its memory limit.\n"), *(DWORD*)(&messageData));
 		return bKillProcess? JobNotifyTerminate : JobNotifyContinue;
 
 	case JOB_OBJECT_MSG_NOTIFICATION_LIMIT:
-		_ftprintf(stdout, _T("[I] The job has signalled that a resource limit was reached by process (%d).\n"), (unsigned)messageData);
+		_ftprintf(stdout, _T("[I] The job has signalled that a resource limit was reached by process (%d).\n"), *(DWORD*)(&messageData));
 		break;
 	}
 
@@ -580,12 +580,12 @@ BuildAndDeploy(TCHAR* jobName, TCHAR* strProcess, HANDLE hProcess)
 	}
 
 	// Duplicate the handle into the target process
-	_ftprintf(stdout, _T("[*] Duplicating job handle %s (%#x) into target process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess));
-	if(!DuplicateHandle(GetCurrentProcess(), hJob, hProcess, NULL, JOB_OBJECT_QUERY, TRUE, DUPLICATE_SAME_ACCESS)){
-		_ftprintf(stdout, _T("[!] Couldn't duplicate job handle %s (%#x) into target process %s (%d): error %d\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess), GetLastError());
+	_ftprintf(stdout, _T("[*] Duplicating job handle %s (%#p) into target process %s (%d).\n"), JOBNAME(jobName), hJob, strProcess, GetProcessId(hProcess));
+	if(!DuplicateHandle(GetCurrentProcess(), hJob, hProcess, NULL, JOB_OBJECT_ALL_ACCESS, TRUE, DUPLICATE_SAME_ACCESS)){
+		_ftprintf(stdout, _T("[!] Couldn't duplicate job handle %s (%#p) into target process %s (%d): error %d\n"), JOBNAME(jobName), hJob, strProcess, GetProcessId(hProcess), GetLastError());
 		goto fail;
 	}
-	_ftprintf(stdout, _T("[I] Duplicated job handle %s (%#x) with restricted access into target process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcess, GetProcessId(hProcess));
+	_ftprintf(stdout, _T("[I] Duplicated job handle %s (%#p) with restricted access into target process %s (%d).\n"), JOBNAME(jobName), hJob, strProcess, GetProcessId(hProcess));
 
 	return hJob;
 
@@ -620,8 +620,8 @@ void PrintSettings(enum OutputSettings_enum fmt)
 	_ftprintf(stdout, _T("[I] Process Memory Limit          - %s - %d byte(s)\n"), TF(Extended.dwProcessMemoryQ), Extended.dwProcessMemory);
 	_ftprintf(stdout, _T("[I] Job Execution Time Limit      - %s - %lld second(s)\n"), TF(Basic.dwJobTicksLimitQ), Basic.dwJobTicksLimit.QuadPart);
 	_ftprintf(stdout, _T("[I] Process Execution Time Limit  - %s - %lld second(s)\n"), TF(Basic.dwProcessTicksLimitQ), Basic.dwProcessTicksLimit.QuadPart);
-	_ftprintf(stdout, _T("[I] Minimum Working Set Limit     - %s - %d byte(s)\n"), TF(Basic.dwMinimumWorkingSetSizeQ), Basic.dwMinimumWorkingSetSize);
-	_ftprintf(stdout, _T("[I] Maximum Working Set Limit     - %s - %d byte(s)\n"), TF(Basic.dwMaximumWorkingSetSizeQ), Basic.dwMaximumWorkingSetSize);
+	_ftprintf(stdout, _T("[I] Minimum Working Set Limit     - %s - %Id byte(s)\n"), TF(Basic.dwMinimumWorkingSetSizeQ), Basic.dwMinimumWorkingSetSize);
+	_ftprintf(stdout, _T("[I] Maximum Working Set Limit     - %s - %Id byte(s)\n"), TF(Basic.dwMaximumWorkingSetSizeQ), Basic.dwMaximumWorkingSetSize);
 	_ftprintf(stdout, _T("[I] Kill Process on Job Close     - %s\n"), TF(Basic.bKillProcOnJobClose == TRUE));
 	_ftprintf(stdout, _T("[I] Break Away from Job OK        - %s\n"), TF(Basic.bBreakAwayOK == TRUE));
 	_ftprintf(stdout, _T("[I] Silent Break Away from Job OK - %s\n"), TF(Basic.bSilentBreakAwayOK == TRUE));
@@ -666,24 +666,24 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 		return FALSE;
 	}
 
-	_ftprintf(stdout, _T("[*] Associating an I/O Completion Port to job %s (%#x)..\n"), JOBNAME(jobName), (unsigned)hJob);
+	_ftprintf(stdout, _T("[*] Associating an I/O Completion Port to job %s (%#p)..\n"), JOBNAME(jobName), hJob);
 	hPort = AssociateJobCompletionPort(hJob, (PVOID)JobNotificationKey);
 	if (!hPort) {
-		_ftprintf(stdout, _T("[!] Couldn't associate an I/O Completion Port to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned)hJob, GetLastError());
+		_ftprintf(stdout, _T("[!] Couldn't associate an I/O Completion Port to job %s (%#p): error %d\n"), JOBNAME(jobName), hJob, GetLastError());
 		goto fail;
 	}
 
 	// Now assign the process to the job object
-	_ftprintf(stdout, _T("[*] Adding process %s (%d) into job %s (%#x)..\n"), strProcName, GetProcessId(hProcess), JOBNAME(jobName), (unsigned)hJob);
+	_ftprintf(stdout, _T("[*] Adding process %s (%d) into job %s (%#p)..\n"), strProcName, GetProcessId(hProcess), JOBNAME(jobName), hJob);
 	if(!AssignProcessToJobObject(hJob,hProcess)){
 		err = GetLastError();
 		if (err == ERROR_ACCESS_DENIED)	// Windows 7 and Server 2008 R2 and below
-			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#x) to process %s (%d) as it looks like a job object has already been applied!\n"), JOBNAME(jobName), (unsigned)hJob, strProcName, GetProcessId(hProcess));
+			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#p) to process %s (%d) as it looks like a job object has already been applied!\n"), JOBNAME(jobName), hJob, strProcName, GetProcessId(hProcess));
 		else
-			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#x) to process %s (%d): error %d\n"), JOBNAME(jobName), (unsigned)hJob, strProcName, GetProcessId(hProcess), err);
+			_ftprintf(stdout, _T("[!] Couldn't apply job object %s (%#p) to process %s (%d): error %d\n"), JOBNAME(jobName), hJob, strProcName, GetProcessId(hProcess), err);
 		goto fail;
 	}
-	_ftprintf(stdout, _T("[*] Applied job %s (%#x) to process %s (%d).\n"), JOBNAME(jobName), (unsigned)hJob, strProcName, GetProcessId(hProcess));
+	_ftprintf(stdout, _T("[*] Applied job %s (%#p) to process %s (%d).\n"), JOBNAME(jobName), hJob, strProcName, GetProcessId(hProcess));
 
 
 	_ftprintf(stdout, _T("[*] Successfully built and deployed job object to %s (%d).\n"), strProcName, pid);
@@ -693,7 +693,7 @@ AttachJobToPid(TCHAR* jobName, DWORD pid)
 		goto leave;
 
 	// wait until the process or port has signalled
-	_ftprintf(stdout, _T("[*] Waiting for events from job %s (%#x).\n"), JOBNAME(jobName), (unsigned)hJob);
+	_ftprintf(stdout, _T("[*] Waiting for events from job %s (%#p).\n"), JOBNAME(jobName), hJob);
 	if (!WaitForProcess(hProcess, hPort))
 		_ftprintf(stdout, _T("[!] Unexpected error while trying to wait for events!\n"));
 
@@ -839,15 +839,15 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 	}
 
 	// Assign an I/O Completion Port to it
-	_ftprintf(stdout, _T("[*] Associating an I/O Completion Port to job %s (%#x)..\n"), JOBNAME(jobName), (unsigned)hJob);
+	_ftprintf(stdout, _T("[*] Associating an I/O Completion Port to job %s (%#p)..\n"), JOBNAME(jobName), hJob);
 	hPort = AssociateJobCompletionPort(hJob, (PVOID)JobNotificationKey);
 	if (!hPort) {
-		_ftprintf(stdout, _T("[!] Couldn't associate an I/O Completion Port to job %s (%#x): error %d\n"), JOBNAME(jobName), (unsigned)hJob, GetLastError());
+		_ftprintf(stdout, _T("[!] Couldn't associate an I/O Completion Port to job %s (%#p): error %d\n"), JOBNAME(jobName), hJob, GetLastError());
 		goto fail;
 	}
 
 	// assign the job object to ourselves
-	_ftprintf(stdout, _T("[*] Adding current process (%d) into job %s (%#x)..\n"), GetCurrentProcessId(), JOBNAME(jobName), (unsigned)hJob);
+	_ftprintf(stdout, _T("[*] Adding current process (%d) into job %s (%#p)..\n"), GetCurrentProcessId(), JOBNAME(jobName), hJob);
 	if (!AssignProcessToJobObject(hJob, GetCurrentProcess())) {
 		err = GetLastError();
 		if (err == ERROR_ACCESS_DENIED) { // Windows 7 and Server 2008 R2 and below
@@ -895,7 +895,7 @@ CreateProcessInJob(TCHAR* jobName, TCHAR** argv)
 		goto leave;
 
 	// wait until the process or port has signalled
-	_ftprintf(stdout, _T("[*] Waiting for events from job %s (%#x).\n"), JOBNAME(jobName), (unsigned)hJob);
+	_ftprintf(stdout, _T("[*] Waiting for events from job %s (%#p).\n"), JOBNAME(jobName), hJob);
 	if (!WaitForProcess(hProcess, hPort))
 		_ftprintf(stdout, _T("[!] Unexpected error while trying to wait for events!\n"));
 
