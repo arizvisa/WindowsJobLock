@@ -618,8 +618,8 @@ void PrintSettings(enum OutputSettings_enum fmt)
 	// continue on with the rest of the configuration
 	_ftprintf(stdout, _T("[I] Job Memory Limit              - %s - %d byte(s)\n"), TF(Extended.dwJobMemoryQ), Extended.dwJobMemory);
 	_ftprintf(stdout, _T("[I] Process Memory Limit          - %s - %d byte(s)\n"), TF(Extended.dwProcessMemoryQ), Extended.dwProcessMemory);
-	_ftprintf(stdout, _T("[I] Job Execution Time Limit      - %s - %lld second(s)\n"), TF(Basic.dwJobTicksLimitQ), Basic.dwJobTicksLimit.QuadPart);
-	_ftprintf(stdout, _T("[I] Process Execution Time Limit  - %s - %lld second(s)\n"), TF(Basic.dwProcessTicksLimitQ), Basic.dwProcessTicksLimit.QuadPart);
+	_ftprintf(stdout, _T("[I] Job Execution Time Limit      - %s - %g second(s)\n"), TF(Basic.dwJobTicksLimitQ), Basic.dwJobTicksLimit.QuadPart / 1e4);
+	_ftprintf(stdout, _T("[I] Process Execution Time Limit  - %s - %g second(s)\n"), TF(Basic.dwProcessTicksLimitQ), Basic.dwProcessTicksLimit.QuadPart / 1e4);
 	_ftprintf(stdout, _T("[I] Minimum Working Set Limit     - %s - %Id byte(s)\n"), TF(Basic.dwMinimumWorkingSetSizeQ), Basic.dwMinimumWorkingSetSize);
 	_ftprintf(stdout, _T("[I] Maximum Working Set Limit     - %s - %Id byte(s)\n"), TF(Basic.dwMaximumWorkingSetSizeQ), Basic.dwMaximumWorkingSetSize);
 	_ftprintf(stdout, _T("[I] Kill Process on Job Close     - %s\n"), TF(Basic.bKillProcOnJobClose == TRUE));
@@ -992,6 +992,7 @@ PrintHelp(TCHAR *strExe)
 int _tmain(int argc, TCHAR* argv[])
 {
 	char  chOpt;
+	double ticks;
 
 	// option settings
 	DWORD dwPID = 0;
@@ -1045,11 +1046,21 @@ int _tmain(int argc, TCHAR* argv[])
 			break;
 		case _T('T'):
 			Basic.dwJobTicksLimitQ = TRUE;
-			Basic.dwJobTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
+			ticks = _tcstod(optarg, NULL);
+			if (!ticks && errno) {
+				_ftprintf(stdout, _T("[!] Unable to parse the job timeout as a floating point number (%d): %s.\n"), errno, optarg);
+				return EXIT_FAILURE;
+			}
+			Basic.dwJobTicksLimit.QuadPart = ticks * 1e4; argpos++;
 			break;
 		case _T('t'):
 			Basic.dwProcessTicksLimitQ = TRUE;
-			Basic.dwProcessTicksLimit.QuadPart = _tstoi64(optarg); argpos++;
+			ticks = _tcstod(optarg, NULL);
+			if (!ticks && errno) {
+				_ftprintf(stdout, _T("[!] Unable to parse the process timeout as a floating point number (%d): %s.\n"), errno, optarg);
+				return EXIT_FAILURE;
+			}
+			Basic.dwProcessTicksLimit.QuadPart = ticks * 1e4; argpos++;
 			break;
 		case _T('w'):
 			Basic.dwMinimumWorkingSetSizeQ = TRUE;
